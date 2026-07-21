@@ -40,23 +40,25 @@ _scan_containers() {
   docker_alive || return 0
   local base="$VPS_SEC_STATE/baseline/containers.txt"
   [[ -f "$base" ]] || return 0
-  local current; current="$(baseline_collect_containers)"
-  local line
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    if ! grep -qxF "$line" "$base"; then
-      local image name ports sev="medium"
-      image="${line%%|*}"; name="$(cut -d'|' -f2 <<<"$line")"; ports="${line##*|}"
-      # Container publicando em 0.0.0.0 ou privileged → high.
+  # Identidade do container = NOME (estável). A string de portas do `docker ps`
+  # varia de ordem/formato entre execuções (IPv4/IPv6), então NÃO serve para
+  # detectar "novo" — mudança de porta de um container existente não é novo.
+  local base_names; base_names="$(cut -d'|' -f2 "$base" | sort -u)"
+  local image name ports
+  while IFS='|' read -r image name ports; do
+    [[ -z "$name" ]] && continue
+    if ! grep -qxF "$name" <<<"$base_names"; then
+      local sev="medium"
+      # Container publicando em todas as interfaces → high.
       [[ "$ports" == *"0.0.0.0:"* || "$ports" == *":::"* ]] && sev="high"
       local details; details="$(jq -n --arg i "$image" --arg n "$name" --arg p "$ports" \
         '{image:$i, name:$n, ports:$p}')"
       alert_send "new_docker_container" "$sev" "$details" \
         "Novo container detectado. Confirme se foi um deploy legítimo" \
-        "container:$name:$image"
+        "container:$name"
       log_file "new_docker_container name=$name image=$image" "$VPS_SEC_LOG_DIR/monitor.log"
     fi
-  done <<<"$current"
+  done < <(docker ps --format '{{.Image}}|{{.Names}}|{{.Ports}}' 2>/dev/null)
 }
 
 # UFW foi desativado (só alerta se o baseline indicava ativo).
