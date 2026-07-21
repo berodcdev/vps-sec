@@ -16,3 +16,6 @@ audit-*.txt
 # Config real com segredos (só o config.example vai versionado)
 config
 etc/config
+
+# Workflow do n8n — mantido só localmente, fora do versionamento
+/n8n/
