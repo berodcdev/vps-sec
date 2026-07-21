@@ -6,7 +6,10 @@
 # URL para onde os alertas JSON são enviados via POST.
 WEBHOOK_URL=""
 
-# Nome do nó nos alertas. Vazio = usa `hostname -f`.
+# Nome amigável do host nos alertas (campo "hostname" do payload).
+# Vazio = usa o IP primário do servidor (melhor que o hostname padrão do
+# provedor, ex.: "srv1359..."). Defina um nome se preferir, ex.: "vps-n8n-01".
+# O IP também vai sempre no campo "host_ip" do payload, independente disto.
 NODE_NAME=""
 
 # ── Alertas ─────────────────────────────────────────────────────────────────

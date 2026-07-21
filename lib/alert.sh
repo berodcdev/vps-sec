@@ -174,11 +174,13 @@ _alert_emit() {
   payload="$(jq -n \
     --argjson sv 1 \
     --arg et "$event_type" --arg sev "$severity" --arg host "$host" \
+    --arg ip "${PRIMARY_IP:-}" \
     --arg ts "$ts" --arg ver "$ver" --arg eid "$event_id" \
     --argjson details "$details_json" \
     --arg action "$action" \
     --argjson supp "${ALERT_SUPPRESSED_SINCE_LAST:-0}" \
     '{schema_version:$sv, event_type:$et, severity:$sev, hostname:$host,
+      host_ip:(if $ip=="" then null else $ip end),
       timestamp:$ts, agent_version:$ver, event_id:$eid,
       details:$details,
       suggested_action:(if $action=="" then null else $action end),
@@ -202,9 +204,10 @@ alert_test() {
   local payload ts host ver
   ts="$(now_utc)"; host="${NODE_NAME:-$(hostname)}"; ver="$(_alert_version)"
   payload="$(jq -n --argjson sv 1 --arg et "test" --arg sev "info" \
-    --arg host "$host" --arg ts "$ts" --arg ver "$ver" \
+    --arg host "$host" --arg ip "${PRIMARY_IP:-}" --arg ts "$ts" --arg ver "$ver" \
     --arg eid "$(short_sha1 "$host|test|$ts")" --argjson details "$details" \
     '{schema_version:$sv, event_type:$et, severity:$sev, hostname:$host,
+      host_ip:(if $ip=="" then null else $ip end),
       timestamp:$ts, agent_version:$ver, event_id:$eid, details:$details,
       suggested_action:null, suppressed_since_last:0}')"
 
