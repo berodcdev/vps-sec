@@ -92,28 +92,9 @@ _alert_should_send() {
   local now; now="$(epoch)"
   local cooldown="${ALERT_COOLDOWN:-900}"
 
-  # Cap global por hora.
-  local capfile="$VPS_SEC_STATE/dedup/.global"
-  local win_start=0 win_count=0
-  if [[ -f "$capfile" ]]; then
-    read -r win_start win_count <"$capfile" 2>/dev/null || true
-  fi
-  if (( now - win_start >= 3600 )); then
-    win_start="$now"; win_count=0
-  fi
-  win_count=$((win_count+1))
-  printf '%s %s\n' "$win_start" "$win_count" >"$capfile"
-
-  local cap="${GLOBAL_ALERT_CAP_HOUR:-30}"
-  if (( win_count == cap + 1 )); then
-    ALERT_STORM_TRIGGERED=1   # sinaliza para quem chamou emitir alert_storm
-  fi
-  if (( win_count > cap )); then
-    flock -u 9 2>/dev/null || true
-    return 1
-  fi
-
-  # Dedup por chave.
+  # 1) Dedup por chave PRIMEIRO. Repetição dentro do cooldown é suprimida sem
+  #    consumir a cota global (senão eventos recorrentes deduplicados estouram
+  #    o cap e disparam alert_storm falso).
   local kf; kf="$VPS_SEC_STATE/dedup/$(short_sha1 "$event_type|$key")"
   local last=0 suppressed=0
   if [[ -f "$kf" ]]; then
@@ -125,7 +106,29 @@ _alert_should_send() {
     flock -u 9 2>/dev/null || true
     return 1
   fi
-  # Passou o cooldown → envia e zera o contador de suprimidos.
+
+  # 2) O evento VAI ser enviado → só agora conta na cota global por hora.
+  local capfile="$VPS_SEC_STATE/dedup/.global"
+  local win_start=0 win_count=0
+  if [[ -f "$capfile" ]]; then
+    read -r win_start win_count <"$capfile" 2>/dev/null || true
+  fi
+  if (( now - win_start >= 3600 )); then
+    win_start="$now"; win_count=0
+  fi
+  local cap="${GLOBAL_ALERT_CAP_HOUR:-30}"
+  if (( win_count >= cap )); then
+    # Cota estourada: dispara alert_storm apenas na primeira vez da janela.
+    if (( win_count == cap )); then ALERT_STORM_TRIGGERED=1; fi
+    win_count=$((win_count+1))
+    printf '%s %s\n' "$win_start" "$win_count" >"$capfile"
+    flock -u 9 2>/dev/null || true
+    return 1
+  fi
+  win_count=$((win_count+1))
+  printf '%s %s\n' "$win_start" "$win_count" >"$capfile"
+
+  # 3) Envia e zera o contador de suprimidos desta chave.
   ALERT_SUPPRESSED_SINCE_LAST="$suppressed"
   printf '%s 0\n' "$now" >"$kf"
   flock -u 9 2>/dev/null || true
