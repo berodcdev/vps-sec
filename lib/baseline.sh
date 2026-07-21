@@ -12,11 +12,25 @@ baseline_collect_ports() {
   ss -tulnH 2>/dev/null | awk '{print $1, $5}' | sort -u
 }
 
-# Containers ativos: "image ports" ordenado (sem ID/nome efêmero de recreate).
-baseline_collect_containers() {
+# Snapshot dos containers com IDENTIDADE ESTÁVEL. A identidade é o serviço do
+# compose ("projeto/serviço") — que NÃO muda quando o container é recriado num
+# deploy — caindo para o nome do container quando não é gerenciado por compose.
+# Formato por linha (TSV): identidade \t imagem \t ports
+container_snapshot() {
   docker_alive || return 0
-  docker ps --format '{{.Image}}|{{.Names}}|{{.Ports}}' 2>/dev/null | sort -u
+  docker ps --format '{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.Ports}}' 2>/dev/null \
+    | while IFS='|' read -r name proj svc image ports; do
+        local id
+        if [[ -n "$svc" ]]; then id="${proj:+$proj/}$svc"; else id="$name"; fi
+        printf '%s\t%s\t%s\n' "$id" "$image" "$ports"
+      done | sort -u
 }
+
+# Só as identidades estáveis (uma por linha) — base do diff novo/caído.
+container_ids() { container_snapshot | cut -f1 | grep -v '^[[:space:]]*$' | sort -u; }
+
+# Baseline de containers = conjunto de identidades conhecidas.
+baseline_collect_containers() { container_ids; }
 
 # IPs que já logaram com sucesso via SSH (para distinguir login "novo").
 baseline_collect_ips() {

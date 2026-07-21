@@ -40,25 +40,22 @@ _scan_containers() {
   docker_alive || return 0
   local base="$VPS_SEC_STATE/baseline/containers.txt"
   [[ -f "$base" ]] || return 0
-  # Identidade do container = NOME (estável). A string de portas do `docker ps`
-  # varia de ordem/formato entre execuções (IPv4/IPv6), então NÃO serve para
-  # detectar "novo" — mudança de porta de um container existente não é novo.
-  local base_names; base_names="$(cut -d'|' -f2 "$base" | sort -u)"
-  local image name ports
-  while IFS='|' read -r image name ports; do
-    [[ -z "$name" ]] && continue
-    if ! grep -qxF "$name" <<<"$base_names"; then
+  # Identidade estável = serviço do compose (ou nome). Não dispara em deploy que
+  # apenas recria o container (nome muda, serviço não).
+  local id image ports
+  while IFS=$'\t' read -r id image ports; do
+    [[ -z "$id" ]] && continue
+    if ! grep -qxF "$id" "$base"; then
       local sev="medium"
-      # Container publicando em todas as interfaces → high.
       [[ "$ports" == *"0.0.0.0:"* || "$ports" == *":::"* ]] && sev="high"
-      local details; details="$(jq -n --arg i "$image" --arg n "$name" --arg p "$ports" \
-        '{image:$i, name:$n, ports:$p}')"
+      local details; details="$(jq -n --arg i "$image" --arg n "$id" --arg p "$ports" \
+        '{image:$i, service:$n, ports:$p}')"
       alert_send "new_docker_container" "$sev" "$details" \
-        "Novo container detectado. Confirme se foi um deploy legítimo" \
-        "container:$name"
-      log_file "new_docker_container name=$name image=$image" "$VPS_SEC_LOG_DIR/monitor.log"
+        "Novo container/serviço detectado. Confirme se foi um deploy legítimo" \
+        "container:$id"
+      log_file "new_docker_container id=$id image=$image" "$VPS_SEC_LOG_DIR/monitor.log"
     fi
-  done < <(docker ps --format '{{.Image}}|{{.Names}}|{{.Ports}}' 2>/dev/null)
+  done < <(container_snapshot)
 }
 
 # UFW foi desativado (só alerta se o baseline indicava ativo).
@@ -104,20 +101,22 @@ _scan_container_state() {
   [[ "${CONTAINER_HEALTH_ENABLED:-yes}" == "yes" ]] || return 0
   docker_alive || return 0
 
-  # ── (A) container_down: esperado no baseline mas não está rodando ──
+  # ── (A) container_down: serviço do baseline não está mais rodando ──
+  # Compara por identidade estável (serviço do compose), não pelo nome efêmero
+  # do container — assim um deploy que recria o container não vira "caiu".
   local base="$VPS_SEC_STATE/baseline/containers.txt"
   if [[ -f "$base" ]]; then
     local expected current down n
-    expected="$(cut -d'|' -f2 "$base" | sort -u)"
-    current="$(docker ps --format '{{.Names}}' 2>/dev/null | sort -u)"
+    expected="$(grep -v '^[[:space:]]*$' "$base" | sort -u)"
+    current="$(container_ids)"
     down="$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$current") 2>/dev/null)"
     while IFS= read -r n; do
       [[ -z "$n" ]] && continue
       alert_send "container_down" "high" \
-        "$(jq -n --arg n "$n" '{container:$n, message:"Container do baseline não está mais em execução"}')" \
-        "Container esperado parou/sumiu. Reinicie ou, se foi intencional, rode: vps-sec baseline update --containers" \
+        "$(jq -n --arg n "$n" '{service:$n, message:"Serviço do baseline não está mais em execução"}')" \
+        "Serviço esperado parou/sumiu. Reinicie ou, se foi intencional, rode: vps-sec baseline update --containers" \
         "container_down:$n"
-      log_file "container_down name=$n" "$VPS_SEC_LOG_DIR/monitor.log"
+      log_file "container_down id=$n" "$VPS_SEC_LOG_DIR/monitor.log"
     done <<<"$down"
   fi
 
