@@ -21,8 +21,11 @@ One-line (repositório público no GitHub) — troque `berodcdev/vps-sec`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/berodcdev/vps-sec/main/install.sh \
-  | sudo bash -s -- --webhook-url "https://webhook.devpimenta.cloud/webhook/SEU-ID"
+  | sudo bash -s -- --webhook-url "https://SEU-N8N/webhook/SEU-ID"
 ```
+
+A URL do webhook é sempre fornecida no momento da instalação (nunca fica no código).
+Se você omitir `--webhook-url` e rodar num terminal interativo, o instalador pergunta.
 
 O `install.sh` detecta que roda via pipe e baixa o tarball do próprio repositório.
 Você pode fixar o repo/branch por flag (`--repo usuario/repo --branch main`) ou por
