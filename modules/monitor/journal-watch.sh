@@ -11,7 +11,7 @@ declare -A _burst_count _burst_start _burst_alerted
 
 monitor_journal_loop() {
   local ids=() id
-  for id in "${SSH_SYSLOG_IDS[@]}" sudo useradd usermod groupadd; do
+  for id in "${SSH_SYSLOG_IDS[@]}" sudo useradd userdel usermod groupadd; do
     ids+=(-t "$id")
   done
 
@@ -69,6 +69,18 @@ _handle_log_line() {
     alert_send "new_user" "high" "$details" \
       "Se você não criou este usuário, investigue imediatamente" "new_user:$newuser"
     log_file "new_user name=$newuser" "$VPS_SEC_LOG_DIR/monitor.log"
+    return 0
+  fi
+
+  # ── Usuário removido ─────────────────────────────────────────────────────
+  # userdel loga: "delete user 'nome'".
+  if [[ "$line" =~ delete\ user\ \'([^\']+)\' ]]; then
+    local deluser="${BASH_REMATCH[1]}"
+    local details; details="$(jq -n --arg u "$deluser" '{user:$u}')"
+    alert_send "user_deleted" "high" "$details" \
+      "Se você não removeu este usuário, investigue (possível cobertura de rastros)" \
+      "user_deleted:$deluser"
+    log_file "user_deleted name=$deluser" "$VPS_SEC_LOG_DIR/monitor.log"
     return 0
   fi
 

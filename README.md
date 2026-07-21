@@ -176,7 +176,7 @@ parar de enviá-lo, o n8n pode alertar que o host/agente caiu.
 ```
 
 `event_type` possíveis: `ssh_login_success`, `ssh_auth_burst`, `new_user`,
-`sudo_auth_failure`, `file_integrity`, `new_listening_port`, `new_docker_container`,
+`user_deleted`, `sudo_auth_failure`, `file_integrity`, `new_listening_port`, `new_docker_container`,
 `container_down`, `container_unhealthy`, `container_restart_loop`,
 `ufw_disabled`, `audit_finding`, `harden_applied`, `harden_rollback`, `alert_storm`,
 `digest`, `agent_start`, `test`.
