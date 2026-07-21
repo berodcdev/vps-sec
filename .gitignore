@@ -1,0 +1,18 @@
+# Artefatos locais / temporários — nada disso vai para o repositório.
+*.output
+*.log
+*.tmp
+*.swp
+.DS_Store
+
+# Estado/relatórios gerados em runtime (nunca devem existir no repo, mas por segurança)
+/var/
+spool/
+dedup/
+baseline/
+audit-*.json
+audit-*.txt
+
+# Config real com segredos (só o config.example vai versionado)
+config
+etc/config

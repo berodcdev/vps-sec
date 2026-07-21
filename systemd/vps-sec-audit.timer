@@ -1,0 +1,10 @@
+[Unit]
+Description=vps-sec — agenda a auditoria diária
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

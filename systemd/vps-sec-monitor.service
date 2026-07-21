@@ -1,0 +1,24 @@
+[Unit]
+Description=vps-sec — monitor de segurança em tempo real
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/vps-sec/bin/vps-sec monitor run
+Restart=always
+RestartSec=5
+# Roda como root (necessário para /etc/shadow, sshd config, docker.sock),
+# mas confinado ao mínimo.
+NoNewPrivileges=yes
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=no
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+# journald como fonte de eventos.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

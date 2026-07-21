@@ -1,0 +1,9 @@
+[Unit]
+Description=vps-sec — auditoria diária de segurança
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/vps-sec/bin/vps-sec audit --quiet
+Nice=10
+IOSchedulingClass=idle

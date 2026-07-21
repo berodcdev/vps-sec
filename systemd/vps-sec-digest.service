@@ -1,0 +1,8 @@
+[Unit]
+Description=vps-sec — resumo diário (digest / heartbeat)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/vps-sec/bin/vps-sec digest --now
+Nice=10

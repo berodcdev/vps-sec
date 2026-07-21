@@ -1,0 +1,10 @@
+[Unit]
+Description=vps-sec — agenda o resumo diário
+
+[Timer]
+OnCalendar=*-*-* 08:00:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

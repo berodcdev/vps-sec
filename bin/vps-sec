@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# vps-sec — toolkit de segurança para VPS (audit / harden / monitor).
+# Entrypoint único. Descobre o prefixo de instalação e roteia subcomandos.
+set -euo pipefail
+
+# ── Descobre o prefixo (funciona instalado em /opt ou rodado do repo) ───────
+_resolve_prefix() {
+  local src="${BASH_SOURCE[0]}"
+  while [[ -L "$src" ]]; do
+    local dir; dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"; [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  cd -P "$(dirname "$src")/.." && pwd
+}
+VPS_SEC_PREFIX="${VPS_SEC_PREFIX:-$(_resolve_prefix)}"
+export VPS_SEC_PREFIX
+
+# shellcheck source=/dev/null
+. "$VPS_SEC_PREFIX/lib/common.sh"
+
+VERSION="$(cat "$VPS_SEC_PREFIX/VERSION" 2>/dev/null || echo "0.0.0")"
+
+usage() {
+  cat >&2 <<EOF
+${C_BOLD}vps-sec${C_RESET} v$VERSION — segurança para VPS
+
+Uso: vps-sec <comando> [opções]
+
+Comandos:
+  ${C_BOLD}audit${C_RESET} [--json] [--quiet]     Auditoria de segurança (somente leitura)
+                                exit: 0 limpo · 1 findings · 2 crítico
+  ${C_BOLD}harden${C_RESET} [opções]              Aplica correções (guiado, com backup)
+        --dry-run               Só mostra o que mudaria
+        --yes                   Aplica correções SAFE sem perguntar
+        --allow-risky           Habilita perguntar as correções RISKY
+        --only ID[,ID...]       Aplica só os fixes destes checks
+        --confirm-ssh           Confirma mudança de SSH (cancela rollback)
+  ${C_BOLD}rollback${C_RESET} [last|<ts>|--list]  Restaura backup de um harden
+  ${C_BOLD}monitor${C_RESET} <status|run|log>     Daemon de monitoramento
+  ${C_BOLD}baseline${C_RESET} update [--ports|--containers|--integrity|--ips]
+                                Atualiza os baselines do monitor
+  ${C_BOLD}test-webhook${C_RESET}                 Envia um evento de teste ao n8n
+  ${C_BOLD}digest${C_RESET} [--now]               Gera/envia o resumo diário
+  ${C_BOLD}self-update${C_RESET}                   Baixa e reinstala a última versão do repositório
+  ${C_BOLD}version${C_RESET} | ${C_BOLD}help${C_RESET}                Versão / esta ajuda
+  ${C_BOLD}uninstall${C_RESET}                     Remove o vps-sec
+
+Config: $VPS_SEC_CONFIG
+EOF
+}
+
+cmd="${1:-help}"; shift || true
+export VPS_SEC_SUBCMD="$cmd"
+
+case "$cmd" in
+  audit)
+    require_root
+    detect_system
+    load_config
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_MODULES/audit/run.sh"
+    audit_main "$@"
+    ;;
+
+  harden)
+    require_root
+    detect_system
+    load_config
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/backup.sh"
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_MODULES/harden/fixes.sh"
+    harden_main "$@"
+    ;;
+
+  _rollback-pending)
+    # Chamado pelo timer transiente do systemd-run (uso interno).
+    require_root
+    detect_system
+    load_config
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/backup.sh"
+    rollback_pending_ssh
+    ;;
+
+  rollback)
+    require_root
+    detect_system
+    load_config
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/backup.sh"
+    rollback_main "$@"
+    ;;
+
+  monitor)
+    require_root
+    detect_system
+    load_config
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/alert.sh"
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/baseline.sh"
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_MODULES/monitor/run.sh"
+    monitor_main "$@"
+    ;;
+
+  baseline)
+    require_root
+    detect_system
+    load_config
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/baseline.sh"
+    baseline_main "$@"
+    ;;
+
+  test-webhook)
+    require_root
+    detect_system
+    load_config
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/alert.sh"
+    alert_test
+    ;;
+
+  digest)
+    require_root
+    detect_system
+    load_config
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/alert.sh"
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/baseline.sh"
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_MODULES/monitor/digest.sh"
+    digest_main "$@"
+    ;;
+
+  version|--version|-v) echo "vps-sec v$VERSION" ;;
+  help|--help|-h)       usage ;;
+
+  self-update)
+    require_root
+    # Lê a origem gravada na instalação.
+    src="$VPS_SEC_PREFIX/.source"
+    [[ -f "$src" ]] || die "origem desconhecida (.source ausente). Reinstale via install.sh --repo usuario/repo"
+    # shellcheck source=/dev/null
+    . "$src"
+    [[ -n "${GITHUB_REPO:-}" ]] || die "GITHUB_REPO não definido em $src"
+    log "Atualizando a partir de $GITHUB_REPO@${GITHUB_BRANCH:-main}..."
+    # Preserva a config (o install.sh é idempotente e não sobrescreve o config).
+    curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPO/${GITHUB_BRANCH:-main}/install.sh" \
+      | bash -s -- --repo "$GITHUB_REPO" --branch "${GITHUB_BRANCH:-main}" \
+      || die "falha ao atualizar"
+    ;;
+
+  uninstall)
+    require_root
+    if [[ -x "$VPS_SEC_PREFIX/uninstall.sh" ]]; then
+      exec "$VPS_SEC_PREFIX/uninstall.sh" "$@"
+    else
+      die "uninstall.sh não encontrado em $VPS_SEC_PREFIX"
+    fi
+    ;;
+
+  *)
+    error "Comando desconhecido: $cmd"
+    usage
+    exit 64
+    ;;
+esac

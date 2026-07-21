@@ -1,0 +1,55 @@
+# /etc/vps-sec/config — configuração do agente vps-sec
+# Formato: KEY="value" (shell). Este arquivo é lido como root; deve ser
+# chmod 600 e pertencer a root, senão o vps-sec se recusa a carregá-lo.
+
+# ── Webhook do n8n (obrigatório para alertas) ───────────────────────────────
+# URL para onde os alertas JSON são enviados via POST.
+WEBHOOK_URL=""
+
+# Nome do nó nos alertas. Vazio = usa `hostname -f`.
+NODE_NAME=""
+
+# ── Alertas ─────────────────────────────────────────────────────────────────
+# Severidade mínima que gera alerta: low|medium|high|critical
+ALERT_MIN_SEVERITY="low"
+
+# Enviar alerta em login SSH bem-sucedido? (yes/no)
+SSH_ALERT_ON_SUCCESS="yes"
+
+# Digest diário (resumo + heartbeat). (yes/no)
+DIGEST_ENABLED="yes"
+
+# ── Detecção de brute force ─────────────────────────────────────────────────
+# Nº de falhas de auth do mesmo IP dentro da janela para disparar alerta.
+FAIL_BURST_THRESHOLD=10
+# Janela (segundos) para contar as falhas.
+FAIL_BURST_WINDOW=60
+
+# ── Anti-flood ──────────────────────────────────────────────────────────────
+# Tempo (segundos) em que alertas repetidos da mesma chave são suprimidos.
+ALERT_COOLDOWN=900
+# Máximo de alertas por hora antes de emitir 'alert_storm' e silenciar.
+GLOBAL_ALERT_CAP_HOUR=30
+
+# ── Monitor ─────────────────────────────────────────────────────────────────
+# Intervalo (segundos) entre varreduras de estado (portas/containers/integridade).
+SCAN_INTERVAL=60
+
+# Arquivos/diretórios cuja alteração dispara alerta de integridade (sha256).
+INTEGRITY_WATCHLIST="/etc/ssh/sshd_config /etc/ssh/sshd_config.d /etc/sudoers /etc/sudoers.d /etc/passwd /etc/shadow /etc/docker/daemon.json /root/.ssh/authorized_keys /etc/crontab /etc/cron.d"
+
+# ── Saúde de containers (monitor) ───────────────────────────────────────────
+# Alertar quando um container do baseline cai, fica unhealthy ou entra em
+# loop de reinício. (yes/no)
+CONTAINER_HEALTH_ENABLED="yes"
+# Quantos reinícios entre duas varreduras caracterizam um "restart loop".
+RESTART_LOOP_DELTA=3
+
+# ── Consciência de backup (audit) ───────────────────────────────────────────
+# Lista de caminhos a vigiar, no formato "caminho:idade_max_dias" separados por
+# espaço. Alerta (BKP-001) se o arquivo mais recente for mais velho que o limite
+# ou se nada for encontrado. Aceita glob. Exemplo:
+#   BACKUP_WATCH="/var/backups/pg:2 /var/backups/n8n:2 /var/backups/*.sql.gz:1"
+BACKUP_WATCH=""
+# Idade máxima (dias) usada quando um item de BACKUP_WATCH não especifica.
+BACKUP_DEFAULT_MAX_AGE_DAYS=2
