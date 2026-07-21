@@ -21,6 +21,10 @@ report_add() {
   # Sanitiza tabs/newlines no conteúdo textual (input pode vir de logs).
   title="${title//$'\t'/ }"; title="${title//$'\n'/ }"
   detail="${detail//$'\t'/ }"; detail="${detail//$'\n'/ }"
+  # Campos vazios viram "-": com IFS=tab (whitespace), o `read` colapsaria
+  # campos vazios e deslocaria as colunas na leitura. "-" = "sem valor".
+  [[ -z "$detail" ]] && detail="-"
+  [[ -z "$title" ]] && title="-"
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$id" "$sev" "$status" "$title" "$detail" "$fix" >>"$REPORT_FINDINGS_FILE"
 }
@@ -57,18 +61,20 @@ report_compute() {
   REPORT_CNT_pass=0 REPORT_CNT_warn=0 REPORT_CNT_info=0 REPORT_CNT_skipped=0
   while IFS=$'\t' read -r id sev status rest; do
     [[ -z "$id" ]] && continue
+    # Nota: usa VAR=$((VAR+1)) e não ((VAR++)) — este último retorna código 1
+    # quando a variável vale 0, o que sob `set -e` mataria o script.
     case "$status" in
-      PASS)    ((REPORT_CNT_pass++)) ;;
-      WARN)    ((REPORT_CNT_warn++)) ;;
-      INFO)    ((REPORT_CNT_info++)) ;;
-      SKIPPED) ((REPORT_CNT_skipped++)) ;;
+      PASS)    REPORT_CNT_pass=$((REPORT_CNT_pass+1)) ;;
+      WARN)    REPORT_CNT_warn=$((REPORT_CNT_warn+1)) ;;
+      INFO)    REPORT_CNT_info=$((REPORT_CNT_info+1)) ;;
+      SKIPPED) REPORT_CNT_skipped=$((REPORT_CNT_skipped+1)) ;;
       FAIL)
         penalty=$(( penalty + $(_severity_weight "$sev") ))
         case "$sev" in
-          critical) ((REPORT_CNT_critical++)) ;;
-          high)     ((REPORT_CNT_high++)) ;;
-          medium)   ((REPORT_CNT_medium++)) ;;
-          low)      ((REPORT_CNT_low++)) ;;
+          critical) REPORT_CNT_critical=$((REPORT_CNT_critical+1)) ;;
+          high)     REPORT_CNT_high=$((REPORT_CNT_high+1)) ;;
+          medium)   REPORT_CNT_medium=$((REPORT_CNT_medium+1)) ;;
+          low)      REPORT_CNT_low=$((REPORT_CNT_low+1)) ;;
         esac
         ;;
     esac
@@ -107,7 +113,7 @@ report_render_text() {
       [[ "$status" == "PASS" || "$status" == "SKIPPED" ]] && continue
       local col; col="$(_sev_color "$sev")"
       printf '%s%-10s %-9s %-9s %s%s\n' "$col" "$id" "$sev" "$status" "$title" "$C_RESET"
-      [[ -n "$detail" ]] && printf '           %s└─ %s%s\n' "$C_DIM" "$detail" "$C_RESET"
+      [[ -n "$detail" && "$detail" != "-" ]] && printf '           %s└─ %s%s\n' "$C_DIM" "$detail" "$C_RESET"
       [[ "$fix" != "-" ]] && printf '           %s   corrigir: vps-sec harden --only %s%s\n' "$C_DIM" "$id" "$C_RESET"
     done <"$REPORT_FINDINGS_FILE"
 
@@ -138,7 +144,8 @@ report_render_json() {
       --arg title "$title" --arg detail "$detail" --arg fix "$fix" \
       --arg action "$action" \
       '. + [{id:$id, severity:$sev, status:$status, title:$title,
-             detail:$detail, fix_id:(if $fix=="-" then null else $fix end),
+             detail:(if $detail=="-" then null else $detail end),
+             fix_id:(if $fix=="-" then null else $fix end),
              suggested_action:(if $action=="" then null else $action end)}]' \
       <<<"$findings_json")"
   done <"$REPORT_FINDINGS_FILE"

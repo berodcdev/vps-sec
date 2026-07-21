@@ -31,11 +31,13 @@ _handle_log_line() {
   if [[ "$line" =~ Accepted\ (password|publickey)\ for\ ([^ ]+)\ from\ ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
     local method="${BASH_REMATCH[1]}" user="${BASH_REMATCH[2]}" ip="${BASH_REMATCH[3]}"
     [[ "${SSH_ALERT_ON_SUCCESS:-yes}" == "yes" ]] || return 0
-    local sev="info" note="Login SSH bem-sucedido"
-    # Root ou IP fora do baseline → eleva severidade.
+    # Piso 'low' (não 'info') para não ser descartado pelo filtro padrão
+    # ALERT_MIN_SEVERITY=low. Root/IP novo elevam para 'high'.
+    local sev="low" note="Login SSH bem-sucedido"
+    # Root ou IP fora do baseline → eleva severidade para high.
     if [[ "$user" == "root" ]]; then sev="high"; note="Login SSH de ROOT"; fi
     if ! _ip_known "$ip"; then
-      [[ "$sev" == "info" ]] && sev="high"
+      sev="high"
       note="$note (IP novo, fora do histórico)"
     fi
     local details

@@ -101,7 +101,7 @@ _alert_should_send() {
   if (( now - win_start >= 3600 )); then
     win_start="$now"; win_count=0
   fi
-  ((win_count++))
+  win_count=$((win_count+1))
   printf '%s %s\n' "$win_start" "$win_count" >"$capfile"
 
   local cap="${GLOBAL_ALERT_CAP_HOUR:-30}"
@@ -120,7 +120,7 @@ _alert_should_send() {
     read -r last suppressed <"$kf" 2>/dev/null || true
   fi
   if (( now - last < cooldown )); then
-    ((suppressed++))
+    suppressed=$((suppressed+1))
     printf '%s %s\n' "$last" "$suppressed" >"$kf"
     flock -u 9 2>/dev/null || true
     return 1
