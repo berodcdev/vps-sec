@@ -22,30 +22,40 @@ VERSION="$(cat "$VPS_SEC_PREFIX/VERSION" 2>/dev/null || echo "0.0.0")"
 
 usage() {
   cat >&2 <<EOF
-${C_BOLD}vps-sec${C_RESET} v$VERSION — segurança para VPS
 
-Uso: vps-sec <comando> [opções]
+  ${C_CYAN}${C_BOLD}vps-sec${C_RESET} ${C_DIM}v$VERSION${C_RESET}  ${C_DIM}—${C_RESET}  🛡  segurança para VPS
+  ${C_DIM}auditoria · hardening guiado · monitoramento com alertas${C_RESET}
+  ${C_DIM}──────────────────────────────────────────────────────────${C_RESET}
 
-Comandos:
-  ${C_BOLD}audit${C_RESET} [--json] [--quiet]     Auditoria de segurança (somente leitura)
-                                exit: 0 limpo · 1 findings · 2 crítico
-  ${C_BOLD}harden${C_RESET} [opções]              Aplica correções (guiado, com backup)
-        --dry-run               Só mostra o que mudaria
-        --yes                   Aplica correções SAFE sem perguntar
-        --allow-risky           Habilita perguntar as correções RISKY
-        --only ID[,ID...]       Aplica só os fixes destes checks
-        --confirm-ssh           Confirma mudança de SSH (cancela rollback)
-  ${C_BOLD}rollback${C_RESET} [last|<ts>|--list]  Restaura backup de um harden
-  ${C_BOLD}monitor${C_RESET} <status|run|log>     Daemon de monitoramento
-  ${C_BOLD}baseline${C_RESET} update [--ports|--containers|--integrity|--ips]
-                                Atualiza os baselines do monitor
-  ${C_BOLD}test-webhook${C_RESET}                 Envia um evento de teste ao n8n
-  ${C_BOLD}digest${C_RESET} [--now]               Gera/envia o resumo diário
-  ${C_BOLD}self-update${C_RESET}                   Baixa e reinstala a última versão do repositório
-  ${C_BOLD}version${C_RESET} | ${C_BOLD}help${C_RESET}                Versão / esta ajuda
-  ${C_BOLD}uninstall${C_RESET}                     Remove o vps-sec
+  ${C_DIM}uso:${C_RESET} vps-sec ${C_GREEN}<comando>${C_RESET} ${C_DIM}[opções]${C_RESET}
 
-Config: $VPS_SEC_CONFIG
+  ${C_BOLD}${C_YELLOW}▸ Auditoria${C_RESET}
+    ${C_GREEN}audit${C_RESET} ${C_DIM}[--json] [--quiet]${C_RESET}      varre a segurança (somente leitura)
+    ${C_DIM}└ exit: 0 ok · 1 achados · 2 crítico${C_RESET}
+
+  ${C_BOLD}${C_YELLOW}▸ Hardening${C_RESET}
+    ${C_GREEN}harden${C_RESET} ${C_DIM}[opções]${C_RESET}             aplica correções (com backup e rollback)
+       ${C_DIM}--dry-run${C_RESET}                 só mostra o que mudaria
+       ${C_DIM}--yes${C_RESET}                     aplica as correções seguras
+       ${C_DIM}--allow-risky${C_RESET}             habilita as correções arriscadas
+       ${C_DIM}--only ID[,ID…]${C_RESET}           corrige só estes checks
+       ${C_DIM}--confirm-ssh${C_RESET}             confirma a mudança de SSH
+    ${C_GREEN}rollback${C_RESET} ${C_DIM}[last|<ts>|--list]${C_RESET}  restaura um backup do harden
+
+  ${C_BOLD}${C_YELLOW}▸ Monitor & alertas${C_RESET}
+    ${C_GREEN}monitor${C_RESET} ${C_DIM}<status|run|log>${C_RESET}    estado / execução / log do daemon
+    ${C_GREEN}baseline update${C_RESET} ${C_DIM}[…]${C_RESET}         atualiza baselines (portas, containers…)
+    ${C_GREEN}digest${C_RESET} ${C_DIM}[--now]${C_RESET}              resumo diário / heartbeat
+    ${C_GREEN}test-webhook${C_RESET}                envia um evento de teste ao n8n
+
+  ${C_BOLD}${C_YELLOW}▸ Manutenção${C_RESET}
+    ${C_GREEN}self-update${C_RESET}                 atualiza a partir do repositório
+    ${C_GREEN}version${C_RESET} ${C_DIM}·${C_RESET} ${C_GREEN}help${C_RESET}               versão · esta ajuda
+    ${C_GREEN}uninstall${C_RESET}                   remove o vps-sec
+
+  ${C_DIM}config:${C_RESET} $VPS_SEC_CONFIG
+  ${C_DIM}repo:  ${C_RESET} https://github.com/berodcdev/vps-sec
+
 EOF
 }
 
