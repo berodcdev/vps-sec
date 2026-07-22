@@ -42,6 +42,10 @@ monitor_run() {
   # shellcheck source=/dev/null
   . "$VPS_SEC_MODULES/monitor/journal-watch.sh"
 
+  # Auto-cura: regenera o baseline de containers se o formato mudou desde a
+  # última gravação (ex.: após um self-update que alterou a identidade estável).
+  baseline_ensure_containers_format 2>/dev/null || true
+
   log_file "monitor iniciado (pid $$)" "$VPS_SEC_LOG_DIR/monitor.log"
   alert_send "agent_start" "info" \
     "$(jq -n --arg v "$(cat "$VPS_SEC_PREFIX/VERSION" 2>/dev/null)" '{message:"Monitor vps-sec iniciado", version:$v}')" \

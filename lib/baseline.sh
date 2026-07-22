@@ -4,6 +4,15 @@
 
 _BL_DIR="$VPS_SEC_STATE/baseline"
 
+# Versão do FORMATO do baseline de containers (a identidade estável gravada em
+# containers.txt). Suba este número sempre que mudar o formato da identidade —
+# o monitor detecta a divergência no startup e regenera sozinho, evitando o
+# spam de container_down/new_docker_container que uma mudança de formato causa
+# num host que ainda tem o baseline no formato antigo.
+#   1 = "imagem|nome|ports"
+#   2 = identidade estável: compose (proj/svc) → swarm (stack_svc) → nome
+BASELINE_CONTAINERS_FORMAT="2"
+
 # ── Coletores de estado (produzem a "foto" atual em stdout) ─────────────────
 
 # Portas em escuta: "proto local_addr" ordenado (sem PID, que muda a cada restart).
@@ -12,16 +21,24 @@ baseline_collect_ports() {
   ss -tulnH 2>/dev/null | awk '{print $1, $5}' | sort -u
 }
 
-# Snapshot dos containers com IDENTIDADE ESTÁVEL. A identidade é o serviço do
-# compose ("projeto/serviço") — que NÃO muda quando o container é recriado num
-# deploy — caindo para o nome do container quando não é gerenciado por compose.
+# Snapshot dos containers com IDENTIDADE ESTÁVEL. A identidade tem que sobreviver
+# a um deploy que recria o container. Em ordem de preferência:
+#   1) Compose  → "projeto/serviço"  (label com.docker.compose.service)
+#   2) Swarm    → "stack_serviço"    (label com.docker.swarm.service.name)
+#   3) fallback → nome do container
+# GOTCHA: no Swarm o nome do container é "<serviço>.<slot>.<taskid>" e o <taskid>
+# MUDA a cada reagendamento da task. Cair direto no nome (sem checar a label do
+# Swarm) fazia toda reprogramação virar container_down + new_docker_container em
+# loop. A label com.docker.swarm.service.name NÃO tem o sufixo de task → estável.
 # Formato por linha (TSV): identidade \t imagem \t ports
 container_snapshot() {
   docker_alive || return 0
-  docker ps --format '{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.Ports}}' 2>/dev/null \
-    | while IFS='|' read -r name proj svc image ports; do
+  docker ps --format '{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.swarm.service.name"}}|{{.Image}}|{{.Ports}}' 2>/dev/null \
+    | while IFS='|' read -r name proj svc swarmsvc image ports; do
         local id
-        if [[ -n "$svc" ]]; then id="${proj:+$proj/}$svc"; else id="$name"; fi
+        if [[ -n "$svc" ]]; then       id="${proj:+$proj/}$svc"
+        elif [[ -n "$swarmsvc" ]]; then id="$swarmsvc"
+        else                           id="$name"; fi
         printf '%s\t%s\t%s\n' "$id" "$image" "$ports"
       done | sort -u
 }
@@ -61,15 +78,39 @@ baseline_update() {
     all)
       baseline_collect_ports      >"$_BL_DIR/ports.txt"
       baseline_collect_containers >"$_BL_DIR/containers.txt"
+      _baseline_stamp_containers_format
       baseline_collect_ips        >"$_BL_DIR/ips.txt"
       baseline_collect_integrity  >"$_BL_DIR/integrity.sha256"
       ;;
     --ports)      baseline_collect_ports      >"$_BL_DIR/ports.txt" ;;
-    --containers) baseline_collect_containers >"$_BL_DIR/containers.txt" ;;
+    --containers) baseline_collect_containers >"$_BL_DIR/containers.txt"; _baseline_stamp_containers_format ;;
     --ips)        baseline_collect_ips        >"$_BL_DIR/ips.txt" ;;
     --integrity)  baseline_collect_integrity  >"$_BL_DIR/integrity.sha256" ;;
     *) die "baseline: alvo desconhecido '$what'" ;;
   esac
+}
+
+# Carimba a versão de formato do baseline de containers recém-escrito.
+_baseline_stamp_containers_format() {
+  printf '%s\n' "$BASELINE_CONTAINERS_FORMAT" >"$_BL_DIR/.containers-format" 2>/dev/null || true
+}
+
+# Auto-cura: se o baseline de containers foi escrito por uma versão anterior do
+# formato (ou não tem carimbo), regenera-o no formato atual e loga. Chamado no
+# startup do monitor — assim uma atualização de código que muda o formato não
+# gera enxurrada de container_down/new_docker_container contra um baseline velho.
+# No-op se o Docker não estiver disponível (não dá pra regenerar com segurança).
+baseline_ensure_containers_format() {
+  local f="$_BL_DIR/containers.txt" mk="$_BL_DIR/.containers-format"
+  [[ -f "$f" ]] || return 0
+  local cur=""; [[ -f "$mk" ]] && cur="$(cat "$mk" 2>/dev/null)"
+  [[ "$cur" == "$BASELINE_CONTAINERS_FORMAT" ]] && return 0
+  docker_alive || return 0
+  ensure_dirs
+  baseline_collect_containers >"$f" 2>/dev/null || return 0
+  _baseline_stamp_containers_format
+  log_file "baseline de containers regenerado (formato ${cur:-desconhecido} → $BASELINE_CONTAINERS_FORMAT)" \
+    "$VPS_SEC_LOG_DIR/monitor.log" 2>/dev/null || true
 }
 
 # Atualiza só a integridade de um arquivo (usado pelo harden após mudar algo,
