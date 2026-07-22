@@ -18,7 +18,8 @@ PURGE=0
 
 msg "Parando e desabilitando serviços..."
 for u in vps-sec-monitor.service vps-sec-audit.timer vps-sec-digest.timer \
-         vps-sec-audit.service vps-sec-digest.service; do
+         vps-sec-update.timer vps-sec-audit.service vps-sec-digest.service \
+         vps-sec-update.service; do
   systemctl disable --now "$u" >/dev/null 2>&1 || true
 done
 systemctl stop vps-sec-ssh-rollback.timer >/dev/null 2>&1 || true

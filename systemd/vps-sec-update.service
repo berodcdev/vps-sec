@@ -1,0 +1,10 @@
+[Unit]
+Description=vps-sec — auto-atualização a partir do repositório
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/vps-sec/bin/vps-sec self-update
+Nice=10
+IOSchedulingClass=idle

@@ -145,6 +145,9 @@ systemctl enable vps-sec-monitor.service >/dev/null 2>&1 || true
 systemctl restart vps-sec-monitor.service >/dev/null 2>&1 || msg "aviso: monitor não (re)iniciou"
 systemctl enable --now vps-sec-audit.timer >/dev/null 2>&1 || true
 systemctl enable --now vps-sec-digest.timer >/dev/null 2>&1 || true
+# Auto-atualização diária (puxa do repositório). O self-update reinstala tudo e
+# reinicia o monitor — some com o passo manual a cada correção.
+systemctl enable --now vps-sec-update.timer >/dev/null 2>&1 || true
 
 # ── 6. Baselines + teste + primeira auditoria ──────────────────────────────
 msg "Criando baselines iniciais..."
