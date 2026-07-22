@@ -15,6 +15,18 @@ Três pilares:
 
 ---
 
+## Instalação rápida
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/berodcdev/vps-sec/main/install.sh \
+  | sudo bash -s -- --webhook-url "https://SEU-N8N/webhook/SEU-ID"
+```
+
+Um comando, idempotente (re-rodar = upgrade). Funciona em host Docker Compose ou
+Swarm. Detalhes, flags e a atualização automática logo abaixo.
+
+---
+
 ## Instalação
 
 One-line (repositório público no GitHub) — troque `berodcdev/vps-sec`:
@@ -43,7 +55,12 @@ O instalador é idempotente (re-rodar = upgrade). Ele instala em `/opt/vps-sec`,
 testa o webhook e roda a primeira auditoria.
 
 Para atualizar depois: `sudo vps-sec self-update` (rebaixa a última versão do
-repositório e reinstala, preservando sua config).
+repositório e reinstala, preservando sua config — inclui reiniciar o monitor).
+
+**Atualização automática:** o instalador habilita o timer `vps-sec-update.timer`,
+que roda `self-update` 1×/dia (04:00, com jitter). Ou seja, depois de instalado,
+cada host se atualiza sozinho a partir do repositório — corrigir algo passa a ser
+só publicar no `main`. Confira com `systemctl list-timers vps-sec-update.timer`.
 
 Requisitos: Ubuntu/Debian com systemd. Dependências (`jq`, `curl`) são instaladas
 automaticamente. **Nada de firewall é instalado ou alterado na instalação** — UFW e
@@ -140,6 +157,11 @@ O monitor detecta e alerta no n8n quando um container do baseline **cai**
 reinício** (`container_restart_loop`) — útil para saber na hora se o Postgres ou o n8n
 parou. Após parar/remover um container de propósito, rode
 `vps-sec baseline update --containers` para o monitor não alertar `container_down`.
+
+A identidade de cada serviço é **estável entre deploys**: usa a label do Compose
+(`projeto/serviço`) ou do Swarm (`com.docker.swarm.service.name`), caindo para o nome
+do container só quando não há nenhuma. Assim, recriar/reagendar um container (deploy,
+task do Swarm) **não** gera falso `container_down`/`new_docker_container`.
 
 ## Monitoramento e alertas
 
