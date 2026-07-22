@@ -137,7 +137,12 @@ chown root:root "$CONFIG"; chmod 600 "$CONFIG"
 msg "Instalando serviços systemd..."
 cp "$PREFIX"/systemd/*.service "$PREFIX"/systemd/*.timer "$SYSTEMD_DIR"/
 systemctl daemon-reload
-systemctl enable --now vps-sec-monitor.service >/dev/null 2>&1 || msg "aviso: monitor não iniciou"
+# `enable` (persistência no boot) + `restart` em vez de `enable --now`: o
+# `--now` só INICIA se estiver parado — num self-update (install rodando por
+# cima) o daemon já está ativo e continuaria com o código antigo em memória.
+# `restart` recarrega o código novo; se estiver parado, apenas inicia.
+systemctl enable vps-sec-monitor.service >/dev/null 2>&1 || true
+systemctl restart vps-sec-monitor.service >/dev/null 2>&1 || msg "aviso: monitor não (re)iniciou"
 systemctl enable --now vps-sec-audit.timer >/dev/null 2>&1 || true
 systemctl enable --now vps-sec-digest.timer >/dev/null 2>&1 || true
 
