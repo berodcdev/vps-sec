@@ -109,6 +109,16 @@ _scan_container_state() {
     local expected current down n
     expected="$(grep -v '^[[:space:]]*$' "$base" | sort -u)"
     current="$(container_ids)"
+    # Guard: se o baseline espera serviços mas o snapshot atual veio VAZIO, é
+    # quase certo um `docker ps` transitório (daemon reiniciando, transição de
+    # restart) — não a queda simultânea de todos os serviços. Sem este guard,
+    # o comm marcaria TODO o baseline como container_down de uma só vez. Pula a
+    # rodada; o próximo scan (SCAN_INTERVAL) reavalia com o docker já estável.
+    if [[ -n "$expected" && -z "$current" ]]; then
+      log_file "container_down: snapshot vazio (docker ps sem resultado) — checagem pulada nesta rodada" \
+        "$VPS_SEC_LOG_DIR/monitor.log"
+      return 0
+    fi
     down="$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$current") 2>/dev/null)"
     while IFS= read -r n; do
       [[ -z "$n" ]] && continue
