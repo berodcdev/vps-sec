@@ -45,6 +45,7 @@ monitor_run() {
   # Auto-cura: regenera o baseline de containers se o formato mudou desde a
   # última gravação (ex.: após um self-update que alterou a identidade estável).
   baseline_ensure_containers_format 2>/dev/null || true
+  baseline_ensure_ports_format 2>/dev/null || true
 
   log_file "monitor iniciado (pid $$)" "$VPS_SEC_LOG_DIR/monitor.log"
   alert_send "agent_start" "info" \

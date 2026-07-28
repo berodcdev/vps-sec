@@ -28,6 +28,19 @@ _digest_build_and_send() {
       | jq -R -s 'split("\n") | map(select(length>0) | ltrimstr(" ") | capture("(?<n>[0-9]+) +(?<k>.+)")) | map({(.k): (.n|tonumber)}) | add // {}' 2>/dev/null || echo "{}")"
   fi
 
+  # Novidades absorvidas pelo auto-learn nas últimas 24h. Com MONITOR_AUTOLEARN
+  # cada uma alertou só UMA vez; o digest é o lugar que mostra o conjunto.
+  local absorbed="[]"
+  if [[ -f "$VPS_SEC_LOG_DIR/monitor.log" ]]; then
+    local cutoff2; cutoff2="$(date -u -d "$since" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT00:00:00Z)"
+    absorbed="$(awk -v c="$cutoff2" \
+      '$1 >= c && ($2=="new_listening_port" || $2=="new_docker_container" || $2=="container_down") {
+         $1=""; sub(/^ /,""); print }' \
+      "$VPS_SEC_LOG_DIR/monitor.log" 2>/dev/null \
+      | sort -u | head -50 \
+      | jq -R -s 'split("\n") | map(select(length>0))' 2>/dev/null || echo "[]")"
+  fi
+
   # Top IPs atacantes (24h).
   local top_ips="[]"
   if has_cmd journalctl; then
@@ -52,9 +65,10 @@ _digest_build_and_send() {
     --argjson score "${score:-null}" --arg grade "${grade:-null}" \
     --argjson events "$events_json" --argjson top_ips "$top_ips" \
     --argjson sec "${sec_pending:-0}" --argjson spool "${spool:-0}" \
+    --argjson absorbed "$absorbed" \
     '{audit_score:$score, audit_grade:$grade, events_24h:$events,
       top_attacker_ips:$top_ips, security_updates_pending:$sec,
-      spooled_alerts:$spool}')"
+      spooled_alerts:$spool, state_changes_24h:$absorbed}')"
 
   # Digest ignora dedup/severidade (é heartbeat) → usa _alert_emit direto.
   _alert_emit "digest" "info" "$details" "" "digest:$(date -u +%Y%m%d)"

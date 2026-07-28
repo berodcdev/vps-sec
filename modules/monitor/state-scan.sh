@@ -9,10 +9,27 @@ monitor_scan_loop() {
     _scan_ports           || true
     _scan_containers      || true
     _scan_container_state || true
+    _absorb_containers    || true
     _scan_ufw             || true
     _scan_integrity       || true
     sleep "$interval"
   done
+}
+
+# Auto-learn ligado? Quando ligado, uma novidade gera UM alerta e em seguida é
+# absorvida no baseline — em vez de reaparecer como "nova" em toda varredura e
+# ser realertada a cada ALERT_COOLDOWN, indefinidamente, até alguém rodar
+# `vps-sec baseline update` na mão. Desligue (no) para o comportamento antigo,
+# em que a divergência insiste até ser confirmada manualmente.
+_autolearn() { [[ "${MONITOR_AUTOLEARN:-yes}" == "yes" ]]; }
+
+# Descobre o processo dono de uma porta (busca pelo número, já que o endereço
+# no baseline está canonizado e não casa literalmente com a saída do `ss`).
+_port_process() {
+  local port="$1"
+  ss -tulnpH 2>/dev/null \
+    | awk -v p=":$port" '$5 ~ p"$" {print; exit}' \
+    | grep -oE 'users:\(\("[^"]+"' | head -1 | sed 's/users:((//; s/"//g'
 }
 
 # Nova porta em escuta (não presente no baseline).
@@ -20,19 +37,35 @@ _scan_ports() {
   local base="$VPS_SEC_STATE/baseline/ports.txt"
   [[ -f "$base" ]] || return 0
   local current; current="$(baseline_collect_ports)"
+  # Guard: coleta vazia = `ss` falhou/ausente. Não é "todas as portas fecharam",
+  # e nunca deve sobrescrever o baseline com nada.
+  [[ -z "$current" ]] && return 0
+
   local line
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    if ! grep -qxF "$line" "$base"; then
-      local proc; proc="$(ss -tulnpH 2>/dev/null | grep -F "${line##* }" | grep -oE 'users:\(\("[^"]+"' | head -1 | sed 's/users:((//; s/"//g')"
-      local details; details="$(jq -n --arg l "$line" --arg p "${proc:-?}" \
-        '{listener:$l, process:$p}')"
-      alert_send "new_listening_port" "high" "$details" \
-        "Nova porta em escuta. Se não é esperado, investigue o processo" \
-        "port:$line"
-      log_file "new_listening_port $line proc=${proc:-?}" "$VPS_SEC_LOG_DIR/monitor.log"
-    fi
+    grep -qxF "$line" "$base" && continue
+    # Severidade pelo escopo real de exposição: 0.0.0.0/:: é alto; um bind na
+    # rede do Tailscale/Docker é médio; loopback é info (filtrado no default).
+    local addr_port="${line#* }" port addr scope sev proc
+    port="${addr_port##*:}"; addr="${addr_port%:*}"
+    scope="$(port_scope "$addr")"
+    sev="$(port_scope_severity "$scope")"
+    proc="$(_port_process "$port")"
+    local details; details="$(jq -n --arg l "$line" --arg p "${proc:-?}" --arg s "$scope" \
+      '{listener:$l, process:$p, scope:$s}')"
+    alert_send "new_listening_port" "$sev" "$details" \
+      "Nova porta em escuta. Se não é esperado, investigue o processo" \
+      "port:$line"
+    log_file "new_listening_port $line scope=$scope proc=${proc:-?}" "$VPS_SEC_LOG_DIR/monitor.log"
   done <<<"$current"
+
+  # Absorve o snapshot atual (novidades entram, portas que fecharam saem).
+  if _autolearn && ! printf '%s\n' "$current" | cmp -s - "$base"; then
+    printf '%s\n' "$current" >"$base"
+    _baseline_stamp_ports_format
+    log_file "autolearn_ports baseline de portas sincronizado" "$VPS_SEC_LOG_DIR/monitor.log"
+  fi
 }
 
 # Novo container (não presente no baseline).
@@ -58,6 +91,26 @@ _scan_containers() {
   done < <(container_snapshot)
 }
 
+# Absorve o estado atual dos containers no baseline. Roda DEPOIS de
+# _scan_containers (novos) e _scan_container_state (caídos) — se rodasse antes,
+# apagaria justamente a diferença que esses dois precisam ver.
+_absorb_containers() {
+  _autolearn || return 0
+  docker_alive || return 0
+  local base="$VPS_SEC_STATE/baseline/containers.txt"
+  [[ -f "$base" ]] || return 0
+  local expected current
+  expected="$(grep -v '^[[:space:]]*$' "$base" | sort -u)"
+  current="$(container_ids)"
+  # Mesmo guard do container_down: snapshot vazio com baseline populado é quase
+  # sempre um `docker ps` transitório — não zera o baseline por causa disso.
+  [[ -n "$expected" && -z "$current" ]] && return 0
+  [[ "$current" == "$expected" ]] && return 0
+  if [[ -n "$current" ]]; then printf '%s\n' "$current" >"$base"; else : >"$base"; fi
+  _baseline_stamp_containers_format
+  log_file "autolearn_containers baseline de containers sincronizado" "$VPS_SEC_LOG_DIR/monitor.log"
+}
+
 # UFW foi desativado (só alerta se o baseline indicava ativo).
 _scan_ufw() {
   [[ "${HAS_UFW:-0}" == "1" ]] || return 0
@@ -78,22 +131,36 @@ _scan_ufw() {
 }
 
 # Integridade dos arquivos críticos (sha256 vs baseline).
+# A chave de dedup inclui o HASH: cada conteúdo novo gera o seu alerta, e o
+# mesmo conteúdo não volta a alertar. Sem isso, um arquivo alterado uma vez
+# realertava a cada ALERT_COOLDOWN para sempre.
 _scan_integrity() {
   local base="$VPS_SEC_STATE/baseline/integrity.sha256"
   [[ -f "$base" ]] || return 0
   local current; current="$(baseline_collect_integrity)"
+  [[ -z "$current" ]] && return 0
   # Diferença por linha (hash + caminho).
   local changed
-  changed="$(comm -13 <(sort "$base") <(sort <<<"$current") 2>/dev/null | awk '{print $2}')"
-  local file
-  while IFS= read -r file; do
-    [[ -z "$file" ]] && continue
-    local details; details="$(jq -n --arg f "$file" '{file:$f}')"
+  changed="$(comm -13 <(sort "$base") <(sort <<<"$current") 2>/dev/null)"
+  local line hash file
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    hash="${line%% *}"; file="${line##* }"
+    local details; details="$(jq -n --arg f "$file" --arg h "${hash:0:16}" \
+      '{file:$f, sha256_prefix:$h}')"
     alert_send "file_integrity" "high" "$details" \
       "Arquivo crítico alterado. Se não foi você, pode ser comprometimento" \
-      "integrity:$file"
+      "integrity:$file:$hash"
     log_file "file_integrity changed=$file" "$VPS_SEC_LOG_DIR/monitor.log"
   done <<<"$changed"
+
+  # Absorve o novo estado: o alerta de CADA alteração já foi entregue, e manter
+  # o hash antigo só produziria repetição. Uma alteração posterior tem hash
+  # diferente e volta a alertar.
+  if _autolearn && [[ -n "$changed" ]]; then
+    printf '%s\n' "$current" >"$base"
+    log_file "autolearn_integrity baseline de integridade sincronizado" "$VPS_SEC_LOG_DIR/monitor.log"
+  fi
 }
 
 # Saúde dos containers: caiu, unhealthy, restart loop. Uma coleta em lote.

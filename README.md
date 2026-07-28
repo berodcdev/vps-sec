@@ -155,8 +155,7 @@ BACKUP_WATCH="/var/backups/pg:2 /var/backups/n8n:2"
 O monitor detecta e alerta no n8n quando um container do baseline **cai**
 (`container_down`), fica **unhealthy** (`container_unhealthy`) ou entra em **loop de
 reinício** (`container_restart_loop`) — útil para saber na hora se o Postgres ou o n8n
-parou. Após parar/remover um container de propósito, rode
-`vps-sec baseline update --containers` para o monitor não alertar `container_down`.
+parou.
 
 A identidade de cada serviço é **estável entre deploys**: usa a label do Compose
 (`projeto/serviço`) ou do Swarm (`com.docker.swarm.service.name`), caindo para o nome
@@ -175,6 +174,17 @@ O serviço `vps-sec-monitor` roda dois loops:
 **Anti-flood**: alertas repetidos da mesma chave são deduplicados por cooldown
 (15 min) e há um teto global por hora — ao estourar, um único `alert_storm` é enviado.
 Brute force nunca vira enxurrada: já é agregado em um alerta com a contagem.
+
+**Uma novidade = um alerta.** Subiu um container, instalou o Tailscale, abriu uma
+porta? Você recebe **um** aviso e o monitor absorve a mudança no baseline — nada de
+repetição a cada 15 minutos até você atualizar o baseline na mão. O resumo do que
+mudou nas últimas 24h vai no digest diário (`state_changes_24h`). Para o
+comportamento antigo (insistir até confirmação manual), use `MONITOR_AUTOLEARN="no"`.
+
+A severidade de uma porta nova acompanha a exposição real: `0.0.0.0`/`[::]` é **alto**,
+um bind na rede do Tailscale/Docker é **médio**, e loopback é **info** (não notifica no
+default). Sockets dual-stack contam como um só — `0.0.0.0:8080` e `[::]:8080` são o
+mesmo serviço, não dois alertas.
 
 Se o webhook estiver fora do ar, os alertas vão para um **spool** em disco e são
 reenviados depois. O **digest diário** (08:00) também serve de **heartbeat**: se um host

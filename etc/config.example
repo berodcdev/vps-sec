@@ -38,6 +38,12 @@ GLOBAL_ALERT_CAP_HOUR=30
 # Intervalo (segundos) entre varreduras de estado (portas/containers/integridade).
 SCAN_INTERVAL=60
 
+# Auto-learn (yes/no). Com "yes", uma porta/container/arquivo novo gera UM
+# alerta e em seguida é absorvido no baseline. Com "no", a divergência continua
+# sendo realertada a cada ALERT_COOLDOWN até você rodar `vps-sec baseline
+# update` — mais insistente, porém ruidoso.
+MONITOR_AUTOLEARN="yes"
+
 # Arquivos/diretórios cuja alteração dispara alerta de integridade (sha256).
 INTEGRITY_WATCHLIST="/etc/ssh/sshd_config /etc/ssh/sshd_config.d /etc/sudoers /etc/sudoers.d /etc/passwd /etc/shadow /etc/docker/daemon.json /root/.ssh/authorized_keys /etc/crontab /etc/cron.d"
 

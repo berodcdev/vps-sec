@@ -119,6 +119,8 @@ config_defaults() {
   GLOBAL_ALERT_CAP_HOUR=30
   SCAN_INTERVAL=60
   INTEGRITY_WATCHLIST="/etc/ssh/sshd_config /etc/ssh/sshd_config.d /etc/sudoers /etc/sudoers.d /etc/passwd /etc/shadow /etc/docker/daemon.json /root/.ssh/authorized_keys /etc/crontab /etc/cron.d"
+  # Auto-learn: absorve a novidade no baseline logo após alertá-la uma vez.
+  MONITOR_AUTOLEARN="yes"
   # Saúde de containers (monitor) e consciência de backup (audit).
   CONTAINER_HEALTH_ENABLED="yes"
   RESTART_LOOP_DELTA=3
@@ -171,7 +173,7 @@ load_config() {
          SSH_ALERT_ON_SUCCESS FAIL_BURST_THRESHOLD FAIL_BURST_WINDOW \
          ALERT_COOLDOWN GLOBAL_ALERT_CAP_HOUR SCAN_INTERVAL INTEGRITY_WATCHLIST \
          CONTAINER_HEALTH_ENABLED RESTART_LOOP_DELTA BACKUP_WATCH \
-         BACKUP_DEFAULT_MAX_AGE_DAYS
+         BACKUP_DEFAULT_MAX_AGE_DAYS MONITOR_AUTOLEARN
 }
 
 # ── Severidade ──────────────────────────────────────────────────────────────
