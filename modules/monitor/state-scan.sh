@@ -32,7 +32,19 @@ _port_process() {
     | grep -oE 'users:\(\("[^"]+"' | head -1 | sed 's/users:((//; s/"//g'
 }
 
+# Linhas não vazias, ordenadas e sem repetição — formato que o `comm` exige.
+_sorted_lines() { printf '%s\n' "$1" | grep . | sort -u || true; }
+
 # Nova porta em escuta (não presente no baseline).
+#
+# GOTCHA: `ss -uln` lista sockets UDP NÃO CONECTADOS — e como UDP não tem estado
+# de conexão, um socket de SAÍDA (consulta DNS, NTP, STUN do Tailscale) aparece
+# exatamente como um listener, com porta efêmera aleatória e vida de segundos.
+# Alertar na primeira aparição gerava um evento novo por socket, eternamente
+# ("udp *:54819", process "?" porque o socket já sumiu). Por isso a porta só
+# vira alerta depois de sobreviver a DUAS varreduras consecutivas: o que é
+# efêmero desaparece nesse intervalo, o que é listener de verdade permanece.
+# Custo: até um SCAN_INTERVAL de atraso no alerta de uma porta legítima.
 _scan_ports() {
   local base="$VPS_SEC_STATE/baseline/ports.txt"
   [[ -f "$base" ]] || return 0
@@ -41,10 +53,21 @@ _scan_ports() {
   # e nunca deve sobrescrever o baseline com nada.
   [[ -z "$current" ]] && return 0
 
+  local pendfile="$VPS_SEC_STATE/ports-pending.txt"
+  local prev_pending=""; [[ -f "$pendfile" ]] && prev_pending="$(cat "$pendfile" 2>/dev/null)"
+
+  local cur_s base_s; cur_s="$(_sorted_lines "$current")"; base_s="$(_sorted_lines "$(cat "$base")")"
+  # Divergentes do baseline nesta rodada.
+  local fresh; fresh="$(comm -23 <(printf '%s\n' "$cur_s") <(printf '%s\n' "$base_s") 2>/dev/null)"
+  # Confirmadas = divergentes que também estavam pendentes na rodada anterior.
+  local confirmed
+  confirmed="$(comm -12 <(_sorted_lines "$fresh") <(_sorted_lines "$prev_pending") 2>/dev/null)"
+  # As de agora ficam pendentes para a próxima rodada.
+  printf '%s\n' "$fresh" >"$pendfile" 2>/dev/null || true
+
   local line
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    grep -qxF "$line" "$base" && continue
     # Severidade pelo escopo real de exposição: 0.0.0.0/:: é alto; um bind na
     # rede do Tailscale/Docker é médio; loopback é info (filtrado no default).
     local addr_port="${line#* }" port addr scope sev proc
@@ -58,13 +81,21 @@ _scan_ports() {
       "Nova porta em escuta. Se não é esperado, investigue o processo" \
       "port:$line"
     log_file "new_listening_port $line scope=$scope proc=${proc:-?}" "$VPS_SEC_LOG_DIR/monitor.log"
-  done <<<"$current"
+  done <<<"$confirmed"
 
-  # Absorve o snapshot atual (novidades entram, portas que fecharam saem).
-  if _autolearn && ! printf '%s\n' "$current" | cmp -s - "$base"; then
-    printf '%s\n' "$current" >"$base"
-    _baseline_stamp_ports_format
-    log_file "autolearn_ports baseline de portas sincronizado" "$VPS_SEC_LOG_DIR/monitor.log"
+  # Absorve: mantém as conhecidas que ainda existem e acrescenta as confirmadas.
+  # As pendentes (vistas só uma vez) NÃO entram — senão seriam adotadas sem
+  # nunca terem sido alertadas, e um listener real que subiu agora passaria batido.
+  if _autolearn; then
+    local keep newbase
+    keep="$(comm -12 <(printf '%s\n' "$cur_s") <(printf '%s\n' "$base_s") 2>/dev/null)"
+    newbase="$(_sorted_lines "$keep
+$confirmed")"
+    if [[ "$newbase" != "$base_s" ]]; then
+      printf '%s\n' "$newbase" >"$base"
+      _baseline_stamp_ports_format
+      log_file "autolearn_ports baseline de portas sincronizado" "$VPS_SEC_LOG_DIR/monitor.log"
+    fi
   fi
 }
 

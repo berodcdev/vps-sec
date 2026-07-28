@@ -191,6 +191,12 @@ A exceção que nunca é agregada nem silenciada: **`ssh_login_after_burst`**. Q
 que estava tentando força bruta *consegue* autenticar, o alerta sai como `critical`, sem
 passar por filtro, dedup ou teto. É o único sinal que o anti-flood jamais pode engolir.
 
+Uma porta só é reportada depois de aparecer em duas varreduras seguidas. Isso filtra
+os sockets UDP de saída (DNS, NTP, STUN do Tailscale), que o `ss` mostra como se fossem
+listeners porque UDP não tem estado de conexão — eles vivem segundos e usam porta
+aleatória, então antes geravam um alerta cada. Um listener de verdade permanece e é
+reportado no ciclo seguinte.
+
 A severidade de uma porta nova acompanha a exposição real: `0.0.0.0`/`[::]` é **alto**,
 um bind na rede do Tailscale/Docker é **médio**, e loopback é **info** (não notifica no
 default). Sockets dual-stack contam como um só — `0.0.0.0:8080` e `[::]:8080` são o
