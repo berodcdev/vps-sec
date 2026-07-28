@@ -53,8 +53,14 @@ audit_services() {
       | grep -c '^Inst.*-security\| Security' || true)"
     sec_pending="${sec_pending:-0}"
     if [[ "$sec_pending" -gt 0 ]]; then
+      # SEM fix_id de propósito: aplicar upgrades de pacote não é reversível
+      # pelo rollback (o backup cobre arquivos de config, não pacotes) e pode
+      # reiniciar serviços. Classificá-lo como SAFE seria mentira. Antes daqui
+      # passava "SVC-003" como fix_id, e o relatório mandava rodar
+      # `vps-sec harden --only SVC-003` — um comando que não existe na
+      # _fix_table e portanto não fazia absolutamente nada.
       report_fail "SVC-003" "high" "$sec_pending atualização(ões) de segurança pendente(s)" \
-        "Rode: apt-get update && apt-get upgrade" "SVC-003"
+        "Aplique manualmente: apt-get update && apt-get upgrade (SVC-002 automatiza as futuras)"
     else
       report_pass "SVC-003" "high" "Nenhuma atualização de segurança pendente"
     fi

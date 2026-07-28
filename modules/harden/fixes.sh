@@ -111,8 +111,11 @@ harden_main() {
 }
 
 # Captura o JSON do audit sem que o exit code (2 p/ crítico) mate o harden.
+# VPS_SEC_AUDIT_NO_ALERT: este audit é interno (descobrir o que corrigir), então
+# não pode disparar audit_finding nem consumir o snapshot de IDs — senão um
+# `harden --dry-run` teria efeito colateral externo.
 _harden_capture_audit() {
-  ( audit_main --json --quiet ) || true
+  ( export VPS_SEC_AUDIT_NO_ALERT=1; audit_main --json --quiet ) || true
 }
 
 # ── Confirmações ────────────────────────────────────────────────────────────
@@ -292,11 +295,30 @@ fix_daemon_json() {
   install -d -m 755 /etc/docker
   backup_file "$dj"
   local base='{}'; [[ -f "$dj" ]] && base="$(cat "$dj")"
-  echo "$base" | jq '. + {"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"},"live-restore":true}' \
-    >"$dj.tmp" 2>/dev/null || { error "daemon.json inválido — abortando"; rm -f "$dj.tmp"; return 1; }
+
+  # GOTCHA GRAVE: `live-restore` é INCOMPATÍVEL com o swarm mode — o dockerd
+  # recusa iniciar ("live-restore daemon configuration is incompatible with
+  # swarm mode"). Como este fix é SAFE (roda com --yes) e termina pedindo um
+  # `systemctl restart docker`, aplicá-lo num nó Swarm derrubava o host inteiro
+  # e o Docker não voltava. Só habilitamos live-restore fora do Swarm.
+  local patch='{"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"},"live-restore":true}'
+  local note="live-restore habilitado (containers sobrevivem a restart do daemon)"
+  if docker_swarm_active; then
+    patch='{"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"}}'
+    note="nó Swarm detectado: live-restore NÃO aplicado (incompatível — impediria o Docker de iniciar)"
+    # Se uma versão anterior do vps-sec já gravou live-restore aqui, remove.
+    if grep -q '"live-restore"[[:space:]]*:[[:space:]]*true' "$dj" 2>/dev/null; then
+      base="$(jq 'del(."live-restore")' <<<"$base" 2>/dev/null || printf '%s' "$base")"
+      note="$note; a chave live-restore preexistente foi REMOVIDA"
+    fi
+  fi
+
+  jq ". + $patch" <<<"$base" >"$dj.tmp" 2>/dev/null \
+    || { error "daemon.json inválido — abortando"; rm -f "$dj.tmp"; return 1; }
   mv "$dj.tmp" "$dj"
-  warn "daemon.json atualizado — requer 'systemctl restart docker' (reinicia containers sem live-restore)"
-  backup_record_cmd "adicionou limites de log ao daemon.json (restart do docker pendente)"
+  log "$note"
+  warn "daemon.json atualizado — requer 'systemctl restart docker' para valer"
+  backup_record_cmd "ajustou daemon.json ($note; restart do docker pendente)"
   ok "daemon.json atualizado (aplique com: systemctl restart docker)"
 }
 

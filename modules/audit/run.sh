@@ -71,20 +71,28 @@ audit_main() {
 # Compara os findings críticos/altos com o penúltimo audit e alerta os novos.
 _audit_alert_new_findings() {
   local current_json="$1"
-  [[ -z "${WEBHOOK_URL:-}" ]] && return 0
-  [[ -f "$VPS_SEC_PREFIX/lib/alert.sh" ]] || return 0
 
-  # IDs críticos/altos do anterior (o symlink ainda aponta pro que acabamos de
-  # escrever nesta run? Não: escrevemos o novo e o symlink já foi trocado.
-  # Guardamos o snapshot anterior separado.)
+  # O harden roda o audit internamente só para descobrir o que corrigir — não
+  # deve, por isso, disparar alertas nem consumir o snapshot de IDs. Um
+  # `harden --dry-run` precisa ser livre de efeito colateral externo.
+  [[ "${VPS_SEC_AUDIT_NO_ALERT:-0}" == "1" ]] && return 0
+
   local prev="$VPS_SEC_STATE/audit-prev-ids.txt"
   local cur_ids
   cur_ids="$(jq -r '.findings[] | select(.status=="FAIL") |
              select(.severity=="critical" or .severity=="high") | .id' \
              <<<"$current_json" 2>/dev/null | sort -u)"
 
+  # GOTCHA: gravar o snapshot ANTES de decidir se alerta. Antes, sem
+  # WEBHOOK_URL a função retornava cedo e o arquivo nunca era escrito — então,
+  # ao configurar o webhook semanas depois, TODOS os findings antigos chegavam
+  # de uma vez como se fossem novos.
   local prev_ids=""
   [[ -f "$prev" ]] && prev_ids="$(sort -u "$prev")"
+  printf '%s\n' "$cur_ids" >"$prev" 2>/dev/null || true
+
+  [[ -z "${WEBHOOK_URL:-}" ]] && return 0
+  [[ -f "$VPS_SEC_PREFIX/lib/alert.sh" ]] || return 0
 
   # shellcheck source=/dev/null
   . "$VPS_SEC_PREFIX/lib/alert.sh"
@@ -105,7 +113,4 @@ _audit_alert_new_findings() {
       alert_send "audit_finding" "$sev" "$details_json" "$action" "audit:$id"
     fi
   done <<<"$cur_ids"
-
-  # Atualiza o snapshot para a próxima run.
-  printf '%s\n' "$cur_ids" >"$prev" 2>/dev/null || true
 }

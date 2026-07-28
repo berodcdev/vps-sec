@@ -105,6 +105,14 @@ docker_alive() {
   [[ "${HAS_DOCKER:-0}" == "1" ]] && docker info >/dev/null 2>&1
 }
 
+# Este host é um nó de Docker Swarm (manager ou worker)?
+# Importa para o harden: várias opções do daemon são incompatíveis com o swarm
+# mode e fazem o dockerd RECUSAR iniciar — ver fix_daemon_json.
+docker_swarm_active() {
+  docker_alive || return 1
+  [[ "$(docker info -f '{{.Swarm.LocalNodeState}}' 2>/dev/null)" == "active" ]]
+}
+
 # ── Config ──────────────────────────────────────────────────────────────────
 # Defaults. Sobrescritos pelo /etc/vps-sec/config se existir e for seguro.
 config_defaults() {

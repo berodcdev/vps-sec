@@ -94,6 +94,17 @@ vps-sec digest --now          # gerar/enviar o resumo diário
 
 ---
 
+## Testes
+
+```bash
+./tests/run.sh        # shellcheck + suítes + contratos do audit (precisa de Docker)
+```
+
+As suítes rodam num container `ubuntu:24.04` porque precisam de bash 5 e utilitários
+GNU — o bash 3.2 do macOS não executa o monitor. É o gate antes de qualquer commit.
+
+---
+
 ## Correções (harden)
 
 **SAFE** (aplicáveis com `--yes`, reversíveis, não derrubam acesso):
