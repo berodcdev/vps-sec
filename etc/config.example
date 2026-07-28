@@ -23,10 +23,18 @@ SSH_ALERT_ON_SUCCESS="yes"
 DIGEST_ENABLED="yes"
 
 # ── Detecção de brute force ─────────────────────────────────────────────────
-# Nº de falhas de auth do mesmo IP dentro da janela para disparar alerta.
+# Nº de falhas de auth do mesmo IP para o IP contar como "ofensor" na janela.
 FAIL_BURST_THRESHOLD=10
 # Janela (segundos) para contar as falhas.
 FAIL_BURST_WINDOW=60
+# Um host com SSH exposto é varrido sem parar. Em vez de um alerta por IP, as
+# falhas são consolidadas em UM alerta por esta janela (segundos), com o total,
+# os IPs distintos e o top 5.
+BURST_AGGREGATE_WINDOW=3600
+# Evento do journal mais velho que isto (segundos) é backlog reprocessado após
+# um restart, não atividade de agora: vai para um resumo único marcado com
+# "source": "backlog", em vez de se disfarçar de ataque em andamento.
+BURST_REPLAY_GRACE=600
 
 # ── Anti-flood ──────────────────────────────────────────────────────────────
 # Tempo (segundos) em que alertas repetidos da mesma chave são suprimidos.

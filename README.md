@@ -167,7 +167,7 @@ task do Swarm) **não** gera falso `container_down`/`new_docker_container`.
 O serviço `vps-sec-monitor` roda dois loops:
 
 1. **journald em tempo real** (`journalctl -f --cursor-file`, sobrevive a rotação e
-   restart): login SSH, brute force (agregado por IP), novo usuário, falha de sudo.
+   restart): login SSH, brute force (agregado por janela), novo usuário, falha de sudo.
 2. **state-scan** (a cada 60s): nova porta em escuta, novo container, UFW desativado,
    integridade (sha256) de arquivos críticos.
 
@@ -180,6 +180,16 @@ porta? Você recebe **um** aviso e o monitor absorve a mudança no baseline — 
 repetição a cada 15 minutos até você atualizar o baseline na mão. O resumo do que
 mudou nas últimas 24h vai no digest diário (`state_changes_24h`). Para o
 comportamento antigo (insistir até confirmação manual), use `MONITOR_AUTOLEARN="no"`.
+
+**Brute force não vira enxurrada.** Um host com a 22 aberta é varrido por botnets sem
+parar — alertar um por IP seria uma torneira aberta, e pior: encheria o teto por hora e
+faria alertas de verdade serem descartados. As falhas são consolidadas em **um alerta por
+hora**, com o total, quantos IPs distintos, quantos cruzaram o limiar e o top 5. Se o
+volume passar de 3× o que aquele host costuma ver, sobe para `critical`.
+
+A exceção que nunca é agregada nem silenciada: **`ssh_login_after_burst`**. Quando um IP
+que estava tentando força bruta *consegue* autenticar, o alerta sai como `critical`, sem
+passar por filtro, dedup ou teto. É o único sinal que o anti-flood jamais pode engolir.
 
 A severidade de uma porta nova acompanha a exposição real: `0.0.0.0`/`[::]` é **alto**,
 um bind na rede do Tailscale/Docker é **médio**, e loopback é **info** (não notifica no
@@ -208,7 +218,7 @@ parar de enviá-lo, o n8n pode alertar que o host/agente caiu.
 ```
 
 `event_type` possíveis: `ssh_login_success`, `ssh_auth_burst`, `new_user`,
-`user_deleted`, `sudo_auth_failure`, `file_integrity`, `new_listening_port`, `new_docker_container`,
+`user_deleted`, `sudo_auth_failure`, `ssh_login_after_burst`, `file_integrity`, `new_listening_port`, `new_docker_container`,
 `container_down`, `container_unhealthy`, `container_restart_loop`,
 `ufw_disabled`, `audit_finding`, `harden_applied`, `harden_rollback`, `alert_storm`,
 `digest`, `agent_start`, `test`.
