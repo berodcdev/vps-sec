@@ -7,6 +7,7 @@ monitor_scan_loop() {
   local interval="${SCAN_INTERVAL:-60}"
   while :; do
     _scan_ports           || true
+    _scan_docker_daemon   || true
     _scan_containers      || true
     _scan_container_state || true
     _absorb_containers    || true
@@ -14,6 +15,49 @@ monitor_scan_loop() {
     _scan_integrity       || true
     sleep "$interval"
   done
+}
+
+# Contador persistente de rodadas consecutivas em que algo esteve "anormal".
+# Em arquivo (não em memória) para sobreviver a restart do monitor.
+# _rounds_bump <nome> → imprime o total após incrementar
+_rounds_bump() {
+  local f="$VPS_SEC_STATE/$1-rounds" n
+  n=$(( $(cat "$f" 2>/dev/null || echo 0) + 1 ))
+  printf '%s\n' "$n" >"$f" 2>/dev/null || true
+  printf '%s' "$n"
+}
+_rounds_reset() { rm -f "$VPS_SEC_STATE/$1-rounds" 2>/dev/null || true; }
+
+# O daemon do Docker morreu?
+#
+# GOTCHA: todas as checagens de container começam com `docker_alive || return 0`.
+# Isso protege contra falso positivo enquanto o daemon reinicia — mas também
+# significa que um Docker MORTO produzia silêncio absoluto: nenhum
+# container_down, nenhum aviso, nada. O host podia estar com tudo fora do ar e o
+# monitor seguia quieto. Aqui é o único lugar que checa a saúde do próprio
+# daemon; exige N rodadas consecutivas para não alertar em restart normal.
+_scan_docker_daemon() {
+  [[ "${HAS_DOCKER:-0}" == "1" ]] || return 0
+  if docker_alive; then
+    if [[ -f "$VPS_SEC_STATE/docker-daemon-rounds" ]]; then
+      log_file "docker_daemon_recovered" "$VPS_SEC_LOG_DIR/monitor.log"
+      _rounds_reset docker-daemon
+    fi
+    return 0
+  fi
+  local n; n="$(_rounds_bump docker-daemon)"
+  local need="${DOCKER_DOWN_ROUNDS:-3}"
+  if (( n < need )); then
+    log_file "docker daemon não responde (rodada $n/$need) — aguardando confirmação" \
+      "$VPS_SEC_LOG_DIR/monitor.log"
+    return 0
+  fi
+  alert_send "docker_daemon_down" "critical" \
+    "$(jq -n --argjson r "$n" --argjson s "${SCAN_INTERVAL:-60}" \
+       '{message:"O daemon do Docker não responde", failed_checks:$r, seconds_down:($r*$s)}')" \
+    "Todos os containers estão fora do ar. Verifique: systemctl status docker ; journalctl -u docker -n 50" \
+    "docker_daemon_down"
+  log_file "docker_daemon_down rounds=$n" "$VPS_SEC_LOG_DIR/monitor.log"
 }
 
 # Auto-learn ligado? Quando ligado, uma novidade gera UM alerta e em seguida é
@@ -209,14 +253,36 @@ _scan_container_state() {
     current="$(container_ids)"
     # Guard: se o baseline espera serviços mas o snapshot atual veio VAZIO, é
     # quase certo um `docker ps` transitório (daemon reiniciando, transição de
-    # restart) — não a queda simultânea de todos os serviços. Sem este guard,
-    # o comm marcaria TODO o baseline como container_down de uma só vez. Pula a
-    # rodada; o próximo scan (SCAN_INTERVAL) reavalia com o docker já estável.
+    # restart) — não a queda simultânea de todos os serviços. Sem o guard, o
+    # comm marcaria TODO o baseline como container_down de uma só vez.
+    #
+    # Mas pular para SEMPRE era um silêncio perigoso: se tudo caiu de verdade,
+    # ninguém era avisado, nunca. Após DOCKER_DOWN_ROUNDS rodadas consecutivas
+    # vazias, tratamos como queda real — e como o problema aí é sistêmico,
+    # emitimos UM alerta agregado em vez de um container_down por serviço.
     if [[ -n "$expected" && -z "$current" ]]; then
-      log_file "container_down: snapshot vazio (docker ps sem resultado) — checagem pulada nesta rodada" \
-        "$VPS_SEC_LOG_DIR/monitor.log"
+      local ne; ne="$(_rounds_bump containers-empty)"
+      local need="${DOCKER_DOWN_ROUNDS:-3}"
+      if (( ne < need )); then
+        log_file "container_down: snapshot vazio (rodada $ne/$need) — checagem pulada" \
+          "$VPS_SEC_LOG_DIR/monitor.log"
+        return 0
+      fi
+      local list count
+      list="$(printf '%s\n' "$expected" | jq -R -s 'split("\n")|map(select(length>0))')"
+      count="$(printf '%s\n' "$expected" | grep -c . || true)"
+      alert_send "containers_all_down" "critical" \
+        "$(jq -n --argjson n "$count" --argjson l "$list" --argjson r "$ne" \
+           '{message:"Nenhum container em execução — todos os serviços do baseline sumiram",
+             expected_services:$n, services:$l, failed_checks:$r}')" \
+        "Todos os serviços esperados estão fora do ar. Verifique o Docker e as stacks: docker ps -a ; systemctl status docker" \
+        "containers_all_down"
+      log_file "containers_all_down expected=$count rounds=$ne" "$VPS_SEC_LOG_DIR/monitor.log"
+      # NÃO segue para o comm: um alerta agregado já cobriu o caso, e emitir
+      # também N container_down seria a enxurrada que o guard evita.
       return 0
     fi
+    _rounds_reset containers-empty
     down="$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$current") 2>/dev/null)"
     while IFS= read -r n; do
       [[ -z "$n" ]] && continue

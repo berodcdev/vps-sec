@@ -71,6 +71,10 @@ INTEGRITY_WATCHLIST="/etc/ssh/sshd_config /etc/ssh/sshd_config.d /etc/sudoers /e
 CONTAINER_HEALTH_ENABLED="yes"
 # Quantos reinícios entre duas varreduras caracterizam um "restart loop".
 RESTART_LOOP_DELTA=3
+# Quantas varreduras consecutivas com o daemon do Docker fora do ar (ou com
+# nenhum container rodando) até tratar como queda real. Evita alarme durante um
+# restart normal do Docker, sem deixar uma queda de verdade passar em silêncio.
+DOCKER_DOWN_ROUNDS=3
 
 # ── Consciência de backup (audit) ───────────────────────────────────────────
 # Lista de caminhos a vigiar, no formato "caminho:idade_max_dias" separados por

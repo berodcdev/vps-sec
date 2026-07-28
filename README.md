@@ -157,7 +157,10 @@ BACKUP_WATCH="/var/backups/pg:2 /var/backups/n8n:2"
 O monitor detecta e alerta no n8n quando um container do baseline **cai**
 (`container_down`), fica **unhealthy** (`container_unhealthy`) ou entra em **loop de
 reinício** (`container_restart_loop`) — útil para saber na hora se o Postgres ou o n8n
-parou.
+parou. Se o **daemon do Docker** morrer (`docker_daemon_down`) ou **todos** os serviços
+sumirem de uma vez (`containers_all_down`), você recebe um alerta crítico agregado em
+vez de silêncio ou de uma enxurrada. Ambos exigem três varreduras seguidas, para um
+`systemctl restart docker` de rotina não virar alarme.
 
 A identidade de cada serviço é **estável entre deploys**: usa a label do Compose
 (`projeto/serviço`) ou do Swarm (`com.docker.swarm.service.name`), caindo para o nome
