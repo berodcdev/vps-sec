@@ -2,22 +2,40 @@
 # modules/audit/50-services.sh — fail2ban, updates automáticos, patches pendentes.
 
 audit_services() {
-  # SVC-001: fail2ban presente e com jail sshd.
-  if [[ "${HAS_FAIL2BAN:-0}" == "1" ]]; then
-    if systemctl is-active --quiet fail2ban 2>/dev/null; then
-      if fail2ban-client status sshd >/dev/null 2>&1; then
-        report_pass "SVC-001" "high" "fail2ban ativo com jail sshd"
+  # SVC-001: fail2ban presente, com jail sshd, e a jail REALMENTE lendo o log.
+  case "$(f2b_state)" in
+    active)
+      # "Ativo" não basta. No Ubuntu 24.04 não há rsyslog, então /var/log/auth.log
+      # não existe: com backend=file a jail sobe, reporta-se ativa e nunca bane
+      # nada. Detectar essa falha silenciosa é o ponto deste check.
+      local backend="" logfiles=""
+      backend="$(fail2ban-client get sshd logencoding >/dev/null 2>&1 && \
+                 grep -rhiE '^\s*backend\s*=' /etc/fail2ban/jail.d/ /etc/fail2ban/jail.local 2>/dev/null \
+                 | head -1 | sed 's/.*=[[:space:]]*//')"
+      logfiles="$(fail2ban-client get sshd logpath 2>/dev/null | grep -oE '/[^ ,]+' || true)"
+      if [[ "$backend" == "systemd" ]]; then
+        report_pass "SVC-001" "high" "fail2ban ativo, jail sshd lendo o journald"
+      elif [[ -n "$logfiles" ]] && [[ ! -r "${logfiles%% *}" ]]; then
+        report_fail "SVC-001" "high" "fail2ban ativo mas a jail sshd não lê nada" \
+          "logpath=${logfiles%% *} não existe (Ubuntu 24.04 não instala rsyslog). Nenhum IP é bloqueado." \
+          "SVC-001"
       else
-        report_warn "SVC-001" "high" "fail2ban ativo mas sem jail sshd" \
-          "Habilite a jail [sshd]" "SVC-001"
+        report_pass "SVC-001" "high" "fail2ban ativo com jail sshd"
       fi
-    else
-      report_fail "SVC-001" "high" "fail2ban instalado mas parado" "" "SVC-001"
-    fi
-  else
-    report_fail "SVC-001" "high" "fail2ban ausente" \
-      "Sem bloqueio automático de brute force SSH" "SVC-001"
-  fi
+      ;;
+    active-nojail)
+      report_fail "SVC-001" "high" "fail2ban ativo mas sem jail sshd" \
+        "O serviço roda, porém nada protege o SSH" "SVC-001"
+      ;;
+    inactive)
+      report_fail "SVC-001" "high" "fail2ban instalado mas parado" \
+        "Sem bloqueio automático de brute force SSH" "SVC-001"
+      ;;
+    *)
+      report_fail "SVC-001" "high" "fail2ban ausente" \
+        "Sem bloqueio automático de brute force SSH" "SVC-001"
+      ;;
+  esac
 
   # SVC-002: unattended-upgrades habilitado.
   local auto=/etc/apt/apt.conf.d/20auto-upgrades

@@ -86,6 +86,8 @@ vps-sec rollback last         # reverter o último harden
 vps-sec monitor status        # estado do monitor
 vps-sec monitor log           # últimos eventos
 vps-sec baseline update       # atualizar os baselines (após mudanças legítimas)
+vps-sec attackers             # histórico de IPs que tentaram força bruta
+vps-sec attackers --json --top 50   # o mesmo em JSON, para automação
 vps-sec test-webhook          # enviar evento de teste ao n8n
 vps-sec digest --now          # gerar/enviar o resumo diário
 ```
@@ -186,6 +188,15 @@ parar — alertar um por IP seria uma torneira aberta, e pior: encheria o teto p
 faria alertas de verdade serem descartados. As falhas são consolidadas em **um alerta por
 hora**, com o total, quantos IPs distintos, quantos cruzaram o limiar e o top 5. Se o
 volume passar de 3× o que aquele host costuma ver, sobe para `critical`.
+
+O alerta ainda informa o estado do **fail2ban** e quantos IPs daquela janela estão
+efetivamente banidos. Se o fail2ban estiver ausente, parado ou com a jail caída, a
+severidade sobe para `critical` e a mensagem afirma o problema — em vez de pedir
+"confirme que está ativo", já que o agente sabe a resposta.
+
+Todo IP atacante vai para um **histórico permanente** (`vps-sec attackers`), com
+primeira aparição, última aparição, total de tentativas e quantas vezes foi banido.
+Os dez maiores reincidentes acompanham o digest diário.
 
 A exceção que nunca é agregada nem silenciada: **`ssh_login_after_burst`**. Quando um IP
 que estava tentando força bruta *consegue* autenticar, o alerta sai como `critical`, sem

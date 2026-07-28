@@ -117,6 +117,9 @@ config_defaults() {
   FAIL_BURST_WINDOW=60
   BURST_AGGREGATE_WINDOW=3600
   BURST_REPLAY_GRACE=600
+  REPORT_TIMEZONE="America/Sao_Paulo"
+  REPORT_TZ_LABEL="Brasília"
+  ATTACKERS_RETENTION_DAYS=365
   ALERT_COOLDOWN=900
   GLOBAL_ALERT_CAP_HOUR=30
   SCAN_INTERVAL=60
@@ -174,6 +177,7 @@ load_config() {
   export WEBHOOK_URL NODE_NAME PRIMARY_IP ALERT_MIN_SEVERITY DIGEST_ENABLED \
          SSH_ALERT_ON_SUCCESS FAIL_BURST_THRESHOLD FAIL_BURST_WINDOW \
          BURST_AGGREGATE_WINDOW BURST_REPLAY_GRACE \
+         REPORT_TIMEZONE REPORT_TZ_LABEL ATTACKERS_RETENTION_DAYS \
          ALERT_COOLDOWN GLOBAL_ALERT_CAP_HOUR SCAN_INTERVAL INTEGRITY_WATCHLIST \
          CONTAINER_HEALTH_ENABLED RESTART_LOOP_DELTA BACKUP_WATCH \
          BACKUP_DEFAULT_MAX_AGE_DAYS MONITOR_AUTOLEARN
@@ -196,6 +200,46 @@ severity_rank() {
 now_utc()      { date -u +%Y-%m-%dT%H:%M:%SZ; }
 now_ts()       { date -u +%Y%m%dT%H%M%SZ; }
 epoch()        { date +%s; }
+
+# ── Datas legíveis (para humanos) ───────────────────────────────────────────
+# Os campos ISO-8601 UTC do payload são o contrato de dados: não-ambíguos,
+# ordenáveis e iguais em qualquer host. Estes helpers geram um campo EXTRA em
+# hora local para exibição — nunca substituem o ISO.
+
+# fmt_local <epoch> [formato]  → "28/07/2026 17:32"
+fmt_local() {
+  local ts="$1" fmt="${2:-%d/%m/%Y %H:%M}"
+  [[ "$ts" =~ ^[0-9]+$ ]] || { printf ''; return; }
+  TZ="${REPORT_TIMEZONE:-America/Sao_Paulo}" date -d "@$ts" +"$fmt" 2>/dev/null || printf ''
+}
+
+# fmt_period <from_epoch> <to_epoch> → "28/07/2026 17:32 → 18:32 (Brasília)"
+# Repete a data no fim só quando o período cruza a meia-noite.
+fmt_period() {
+  local from="$1" to="$2" label="${REPORT_TZ_LABEL:-Brasília}"
+  local a b
+  a="$(fmt_local "$from")"; b="$(fmt_local "$to")"
+  [[ -z "$a" || -z "$b" ]] && { printf ''; return; }
+  if [[ "$(fmt_local "$from" %d/%m/%Y)" == "$(fmt_local "$to" %d/%m/%Y)" ]]; then
+    b="$(fmt_local "$to" %H:%M)"
+  fi
+  printf '%s → %s (%s)' "$a" "$b" "$label"
+}
+
+# ── Estado do fail2ban ──────────────────────────────────────────────────────
+# f2b_state → absent | inactive | active-nojail | active
+f2b_state() {
+  has_cmd fail2ban-client || { echo absent; return; }
+  systemctl is-active --quiet fail2ban 2>/dev/null || { echo inactive; return; }
+  fail2ban-client status sshd >/dev/null 2>&1 && echo active || echo active-nojail
+}
+
+# IPs atualmente banidos na jail sshd (um por linha; vazio se não houver).
+f2b_banned_ips() {
+  has_cmd fail2ban-client || return 0
+  fail2ban-client status sshd 2>/dev/null \
+    | sed -n 's/.*Banned IP list:[[:space:]]*//p' | tr ' ' '\n' | grep . || true
+}
 short_sha1()   { printf '%s' "$1" | sha1sum | cut -c1-16; }
 
 # Cria os diretórios de estado com permissões corretas (idempotente).

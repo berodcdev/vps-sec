@@ -46,6 +46,7 @@ usage() {
     ${C_GREEN}monitor${C_RESET} ${C_DIM}<status|run|log>${C_RESET}    estado / execução / log do daemon
     ${C_GREEN}baseline update${C_RESET} ${C_DIM}[…]${C_RESET}         atualiza baselines (portas, containers…)
     ${C_GREEN}digest${C_RESET} ${C_DIM}[--now]${C_RESET}              resumo diário / heartbeat
+    ${C_GREEN}attackers${C_RESET} ${C_DIM}[--json|--top N]${C_RESET}    histórico de IPs que tentaram força bruta
     ${C_GREEN}test-webhook${C_RESET}                envia um evento de teste ao n8n
 
   ${C_BOLD}${C_YELLOW}▸ Manutenção${C_RESET}
@@ -111,6 +112,8 @@ case "$cmd" in
     # shellcheck source=/dev/null
     . "$VPS_SEC_PREFIX/lib/baseline.sh"
     # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/attackers.sh"
+    # shellcheck source=/dev/null
     . "$VPS_SEC_MODULES/monitor/run.sh"
     monitor_main "$@"
     ;;
@@ -142,8 +145,19 @@ case "$cmd" in
     # shellcheck source=/dev/null
     . "$VPS_SEC_PREFIX/lib/baseline.sh"
     # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/attackers.sh"
+    # shellcheck source=/dev/null
     . "$VPS_SEC_MODULES/monitor/digest.sh"
     digest_main "$@"
+    ;;
+
+  attackers)
+    require_root
+    detect_system
+    load_config
+    # shellcheck source=/dev/null
+    . "$VPS_SEC_PREFIX/lib/attackers.sh"
+    attackers_main "$@"
     ;;
 
   version|--version|-v) echo "vps-sec v$VERSION" ;;

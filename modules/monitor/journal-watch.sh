@@ -239,16 +239,59 @@ _burst_emit() {
   fi
   _burst_baseline_record "$total"
 
-  local action="Ruído de varredura é esperado num host com SSH exposto. Confirme que o fail2ban está ativo e que a autenticação por senha está desabilitada."
-  (( offenders >= 20 )) && action="Volume alto de origens distintas. Confirme fail2ban ativo, desabilite PasswordAuthentication e considere restringir a porta 22 por firewall/VPN."
+  # ── Correlação com o fail2ban ──────────────────────────────────────────────
+  # O agente SABE se o fail2ban está protegendo o host. Não faz sentido pedir
+  # "confirme que está ativo" quando dá para afirmar.
+  local f2b banned_list banned_now banned_from_window=0 ip
+  f2b="$(f2b_state)"
+  banned_list="$(f2b_banned_ips)"
+  banned_now="$(printf '%s\n' "$banned_list" | grep -c . || true)"
+  while IFS= read -r ip; do
+    [[ -z "$ip" ]] && continue
+    ip="${ip%% *}"
+    grep -qxF "$ip" <<<"$banned_list" && banned_from_window=$((banned_from_window+1))
+  done <<<"$pairs"
+
+  local action
+  case "$f2b" in
+    active)
+      action="Ruído de varredura é esperado num host com SSH exposto. O fail2ban está ativo e bloqueando (${banned_now} IP(s) banido(s) agora)."
+      ;;
+    active-nojail)
+      action="ATENÇÃO: o fail2ban está rodando mas a jail sshd NÃO está ativa — nenhuma tentativa está sendo bloqueada. Rode: vps-sec harden --only SVC-001"
+      sev="critical"
+      ;;
+    inactive)
+      action="ATENÇÃO: o fail2ban está INSTALADO MAS PARADO — nenhuma tentativa está sendo bloqueada. Rode: vps-sec harden --only SVC-001"
+      sev="critical"
+      ;;
+    *)
+      action="ATENÇÃO: não há fail2ban neste host — nenhuma tentativa está sendo bloqueada. Rode: vps-sec harden --only SVC-001 e desabilite a autenticação por senha."
+      sev="critical"
+      ;;
+  esac
+  (( offenders >= 20 )) && action="$action Volume alto de origens distintas: considere restringir a porta 22 por firewall/VPN."
 
   local details
   details="$(jq -n --arg k "$kind" --argjson t "$total" --argjson d "$distinct" \
     --argjson o "$offenders" --argjson w "${BURST_AGGREGATE_WINDOW:-3600}" \
     --argjson top "$top" --arg from "$(_iso "$from")" --arg to "$(_iso "$to")" \
+    --arg plocal "$(fmt_period "$from" "$to")" \
+    --arg f2b "$f2b" --argjson bn "${banned_now:-0}" --argjson bw "$banned_from_window" \
     '{failed_attempts:$t, distinct_ips:$d, ips_over_threshold:$o,
       window_seconds:$w, period_start:$from, period_end:$to,
-      top_ips:$top, source:$k}')"
+      period_local:(if $plocal=="" then null else $plocal end),
+      top_ips:$top, source:$k,
+      fail2ban:{status:$f2b, currently_banned:$bn, banned_from_this_window:$bw}}')"
+
+  # Histórico permanente dos atacantes (independe da janela de 24h em memória).
+  while IFS= read -r ip; do
+    [[ -z "$ip" ]] && continue
+    local n="${ip#* }"; ip="${ip%% *}"
+    local was_banned=0; grep -qxF "$ip" <<<"$banned_list" && was_banned=1
+    attackers_record "$ip" "$n" "$to" "$was_banned"
+  done <<<"$pairs"
+  attackers_prune
 
   # Backlog e janela são chaves de dedup distintas: o resumo do replay não pode
   # engolir o alerta da atividade em tempo real que vem logo depois.

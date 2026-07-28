@@ -36,6 +36,16 @@ BURST_AGGREGATE_WINDOW=3600
 # "source": "backlog", em vez de se disfarçar de ataque em andamento.
 BURST_REPLAY_GRACE=600
 
+# ── Apresentação de datas ───────────────────────────────────────────────────
+# Os campos ISO-8601 UTC do payload NÃO mudam (contrato de dados). Além deles,
+# os alertas trazem um "period_local" já formatado para exibição.
+REPORT_TIMEZONE="America/Sao_Paulo"
+REPORT_TZ_LABEL="Brasília"
+
+# ── Histórico de atacantes ──────────────────────────────────────────────────
+# Por quantos dias guardar os IPs que tentaram força bruta (vps-sec attackers).
+ATTACKERS_RETENTION_DAYS=365
+
 # ── Anti-flood ──────────────────────────────────────────────────────────────
 # Tempo (segundos) em que alertas repetidos da mesma chave são suprimidos.
 ALERT_COOLDOWN=900

@@ -60,15 +60,30 @@ _digest_build_and_send() {
   # Tamanho do spool.
   local spool; spool="$(find "$VPS_SEC_STATE/spool" -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
 
+  # Reincidentes do histórico permanente (não só das 24h) + estado do fail2ban.
+  local repeat_offenders="[]" attackers_total=0 f2b_status="absent" f2b_banned=0
+  if declare -F attackers_top_json >/dev/null 2>&1; then
+    repeat_offenders="$(attackers_top_json 10)"
+    attackers_total="$(attackers_count)"
+  fi
+  f2b_status="$(f2b_state)"
+  f2b_banned="$(f2b_banned_ips | grep -c . || true)"
+
   local details
   details="$(jq -n \
     --argjson score "${score:-null}" --arg grade "${grade:-null}" \
     --argjson events "$events_json" --argjson top_ips "$top_ips" \
     --argjson sec "${sec_pending:-0}" --argjson spool "${spool:-0}" \
     --argjson absorbed "$absorbed" \
+    --argjson repeat "$repeat_offenders" --argjson atotal "${attackers_total:-0}" \
+    --arg f2b "$f2b_status" --argjson f2bb "${f2b_banned:-0}" \
+    --arg period "$(fmt_period "$(( $(epoch) - 86400 ))" "$(epoch)")" \
     '{audit_score:$score, audit_grade:$grade, events_24h:$events,
       top_attacker_ips:$top_ips, security_updates_pending:$sec,
-      spooled_alerts:$spool, state_changes_24h:$absorbed}')"
+      spooled_alerts:$spool, state_changes_24h:$absorbed,
+      period_local:(if $period=="" then null else $period end),
+      repeat_offenders:$repeat, attackers_known:$atotal,
+      fail2ban:{status:$f2b, currently_banned:$f2bb}}')"
 
   # Digest ignora dedup/severidade (é heartbeat) → usa _alert_emit direto.
   _alert_emit "digest" "info" "$details" "" "digest:$(date -u +%Y%m%d)"

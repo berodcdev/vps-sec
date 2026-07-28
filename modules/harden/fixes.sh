@@ -133,19 +133,73 @@ _harden_confirm_risky() {
 }
 
 # ── Fixes SAFE ──────────────────────────────────────────────────────────────
+# Redes que nunca devem ser banidas: loopback, RFC1918, CGNAT do Tailscale e —
+# crucialmente — o IP de onde a sessão SSH atual vem. Sem isto é fácil se
+# trancar do lado de fora testando a própria configuração.
+_f2b_ignoreip() {
+  local base="127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10"
+  local here="${SSH_CLIENT%% *}"
+  [[ -z "$here" ]] && here="${SSH_CONNECTION%% *}"
+  [[ "$here" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && base="$base $here"
+  printf '%s' "$base"
+}
+
 fix_fail2ban() {
   DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban >/dev/null 2>&1 || return 1
+  # GOTCHA: o Ubuntu 24.04 não instala mais o rsyslog, então /var/log/auth.log
+  # não existe. Com o backend padrão (auto→file) a jail sshd sobe "ativa" mas
+  # lê um arquivo inexistente e nunca bane nada — falha silenciosa, o pior tipo.
+  # backend=systemd lê o journald e funciona em 22.04 e 24.04; precisa do
+  # binding python3-systemd.
+  DEBIAN_FRONTEND=noninteractive apt-get install -y python3-systemd >/dev/null 2>&1 || \
+    warn "python3-systemd não instalou — o backend systemd pode não funcionar"
+
+  local ignore; ignore="$(_f2b_ignoreip)"
   backup_file /etc/fail2ban/jail.d/vps-sec.conf
-  cat >/etc/fail2ban/jail.d/vps-sec.conf <<'EOF'
+  cat >/etc/fail2ban/jail.d/vps-sec.conf <<EOF
+# Gerado por vps-sec. Editar aqui é seguro (não é sobrescrito sem backup).
+[DEFAULT]
+backend = systemd
+ignoreip = $ignore
+
 [sshd]
 enabled = true
+backend = systemd
 bantime = 1h
 findtime = 10m
 maxretry = 5
 EOF
-  systemctl enable --now fail2ban >/dev/null 2>&1
-  backup_record_cmd "instalou e habilitou fail2ban (jail sshd)"
-  ok "fail2ban configurado"
+  systemctl enable fail2ban >/dev/null 2>&1
+  systemctl restart fail2ban >/dev/null 2>&1
+
+  # Validação real: "ativo" não basta — a jail sshd precisa existir e responder.
+  local state; state="$(_f2b_verify)"
+  case "$state" in
+    active)
+      backup_record_cmd "instalou e habilitou fail2ban (jail sshd, backend systemd)"
+      ok "fail2ban configurado e a jail sshd está ativa (ignoreip: $ignore)"
+      baseline_refresh_integrity 2>/dev/null || true
+      ;;
+    *)
+      error "fail2ban foi instalado mas a jail sshd NÃO está funcionando ($state)."
+      error "Diagnostique com: fail2ban-client status sshd ; journalctl -u fail2ban -n 30"
+      return 1
+      ;;
+  esac
+}
+
+# Espera a jail subir (o fail2ban leva alguns segundos após o restart) e
+# devolve o estado final.
+_f2b_verify() {
+  local i
+  for i in 1 2 3 4 5 6; do
+    case "$(f2b_state)" in
+      active) echo active; return 0 ;;
+      absent) echo absent; return 0 ;;
+    esac
+    sleep 2
+  done
+  f2b_state
 }
 
 fix_unattended() {
